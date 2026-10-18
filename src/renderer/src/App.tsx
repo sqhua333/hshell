@@ -43,7 +43,7 @@ export default function App(): ReactElement {
   // App owns the locale subscription so a language switch re-renders the whole
   // tree; `tr()` is a plain function and cannot subscribe on its own.
   useEffect(() => {
-    document.title = locale === 'zh' ? 'HShell — SSH / 串口客户端' : 'HShell — SSH / Serial Client'
+    document.title = 'HShell'
   }, [locale])
 
   useEffect(() => {

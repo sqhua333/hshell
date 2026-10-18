@@ -16,6 +16,11 @@ files:
   - '!node_modules/**/{test,tests,example,examples,doc,docs}/**'
   - '!node_modules/**/*.{md,map,ts}'
 asar: true
+# The window/taskbar icon is loaded from disk at runtime, so ship it outside
+# the ASAR archive.
+extraResources:
+  - from: build/icons/128x128.png
+    to: icon.png
 # N-API prebuilds cannot be dlopen'ed from inside an ASAR archive.
 asarUnpack:
   - node_modules/@serialport/bindings-cpp/prebuilds/**
