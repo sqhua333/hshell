@@ -1,0 +1,65 @@
+appId: com.hshell.app
+productName: HShell
+copyright: Copyright © 2026 HShell
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**/*
+  - package.json
+  # ssh2 loads cpu-features opportunistically and catches failures; excluding the
+  # prebuilt native module keeps app.asar free of unused platform-specific binaries.
+  # Serial support ships its own N-API prebuilds, unpacked below.
+  - '!node_modules/cpu-features/**'
+  - '!node_modules/ssh2/lib/protocol/crypto/build/**'
+  - '!node_modules/ssh2/util/**'
+  - '!node_modules/**/{test,tests,example,examples,doc,docs}/**'
+  - '!node_modules/**/*.{md,map,ts}'
+asar: true
+# N-API prebuilds cannot be dlopen'ed from inside an ASAR archive.
+asarUnpack:
+  - node_modules/@serialport/bindings-cpp/prebuilds/**
+npmRebuild: false
+electronLanguages:
+  - en-US
+  - zh-CN
+# Flipped after packing and before signing by electron-builder.
+# Embedded ASAR integrity validation is deliberately left off: electron-builder
+# only injects the integrity metadata for macOS/Windows, and enabling the fuse
+# on Linux would make the packaged app refuse to start.
+electronFuses:
+  runAsNode: false
+  enableCookieEncryption: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  onlyLoadAppFromAsar: true
+linux:
+  target:
+    - AppImage
+    - deb
+  icon: build/icons
+  category: Network
+  syncDesktopName: true
+  maintainer: HShell <hshell@example.com>
+  synopsis: Cross-platform SSH and serial client
+  description: HShell is a cross-platform SSH and serial client with tabs, split panes, SFTP, ZMODEM, port forwarding and session logging.
+  artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+win:
+  target:
+    - nsis
+  icon: build/icon.ico
+  artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: HShell
+  uninstallDisplayName: HShell
+mac:
+  target:
+    - dmg
+    - zip
+  icon: build/icon.icns
+  category: public.app-category.developer-tools
+  hardenedRuntime: true
+  artifactName: ${productName}-${version}-${os}-${arch}.${ext}

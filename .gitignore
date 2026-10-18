@@ -1,0 +1,13 @@
+node_modules/
+out/
+dist/
+dist-web/
+*.log
+*.tsbuildinfo
+coverage/
+.env
+.env.*
+scripts/.mock-host-key.pem
+.qoder/
+.claude/
+.DS_Store
