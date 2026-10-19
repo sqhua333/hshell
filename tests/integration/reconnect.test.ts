@@ -6,7 +6,7 @@ import { Server, utils, type Connection } from 'ssh2'
 import { describe, expect, it } from 'vitest'
 import type { AppEvent, Session } from '@shared/types'
 import { KnownHosts } from '../../src/main/ssh/known-hosts'
-import { SshManager } from '../../src/main/ssh/manager'
+import { SshManager, type ReconnectPolicy } from '../../src/main/ssh/manager'
 
 const SESSION: Session = {
   id: 's-reconnect',
@@ -31,7 +31,12 @@ async function waitFor(check: () => boolean, timeout = 10_000): Promise<void> {
 
 async function startServer(acceptAuth: boolean): Promise<{
   port: number
+  /** Graceful end: sends SSH_MSG_DISCONNECT (BY_APPLICATION). */
   dropConnections: () => void
+  /** Abrupt transport failure: resets the TCP connection (ECONNRESET). */
+  resetConnections: () => void
+  /** Stop accepting new connections but leave existing sockets alone. */
+  stopAccepting: () => void
   close: () => Promise<void>
 }> {
   const { private: hostKey } = utils.generateKeyPairSync('rsa', { bits: 2048 })
@@ -67,6 +72,25 @@ async function startServer(acceptAuth: boolean): Promise<{
     dropConnections: () => {
       for (const connection of connections) connection.end()
     },
+    resetConnections: () => {
+      for (const connection of connections) {
+        const socket = (
+          connection as unknown as {
+            _sock?: { resetAndDestroy?: () => void; destroy: () => void }
+          }
+        )._sock
+        if (!socket) continue
+        if (typeof socket.resetAndDestroy === 'function') socket.resetAndDestroy()
+        else socket.destroy()
+      }
+    },
+    stopAccepting: () => {
+      try {
+        server.close()
+      } catch {
+        /* already closed */
+      }
+    },
     close: () =>
       new Promise<void>((resolve) => {
         for (const connection of connections) connection.end()
@@ -75,7 +99,10 @@ async function startServer(acceptAuth: boolean): Promise<{
   }
 }
 
-function setup(port: number): {
+function setup(
+  port: number,
+  reconnect?: ReconnectPolicy
+): {
   manager: SshManager
   events: AppEvent[]
   statuses: string[]
@@ -83,11 +110,18 @@ function setup(port: number): {
 } {
   const events: AppEvent[] = []
   const statuses: string[] = []
-  const manager = new SshManager(new KnownHosts(mkdtempSync(join(tmpdir(), 'hshell-reconnect-'))), (event) => {
-    events.push(event)
-    if (event.type === 'ssh:status') statuses.push(event.status)
-    if (event.type === 'ssh:hostkey') manager.hostKeyDecision(event.prompt.requestId, true)
-  })
+  const manager = new SshManager(
+    new KnownHosts(mkdtempSync(join(tmpdir(), 'hshell-reconnect-'))),
+    (event) => {
+      events.push(event)
+      if (event.type === 'ssh:status') statuses.push(event.status)
+      if (event.type === 'ssh:hostkey') manager.hostKeyDecision(event.prompt.requestId, true)
+    },
+    undefined,
+    undefined,
+    undefined,
+    reconnect
+  )
 
   return {
     manager,
@@ -111,13 +145,56 @@ describe('SshManager reconnect', () => {
       await connect()
       await waitFor(() => statuses.filter((status) => status === 'connected').length === 1)
 
-      server.dropConnections()
+      server.resetConnections()
       await waitFor(() => statuses.includes('reconnecting'))
       await waitFor(() => statuses.filter((status) => status === 'connected').length === 2)
 
       expect(
         events.some((event) => event.type === 'ssh:notice' && event.message === '已重新连接到主机')
       ).toBe(true)
+    } finally {
+      manager.disconnect('rt-reconnect')
+      await server.close()
+    }
+  }, 20_000)
+
+  it('disconnects immediately when the host closes the connection explicitly', async () => {
+    const server = await startServer(true)
+    const { manager, statuses, connect } = setup(server.port)
+    try {
+      await connect()
+      await waitFor(() => statuses.includes('connected'))
+      // An explicit SSH disconnect is a final answer: no backoff, no retry.
+      server.dropConnections()
+      await waitFor(() => statuses.includes('closed'), 5_000)
+      await new Promise((resolve) => setTimeout(resolve, 1_500))
+      expect(statuses).not.toContain('reconnecting')
+      expect(statuses.at(-1)).toBe('closed')
+    } finally {
+      manager.disconnect('rt-reconnect')
+      await server.close()
+    }
+  }, 20_000)
+
+  it('stops retrying and reports closed after the reconnect budget', async () => {
+    const server = await startServer(true)
+    const { manager, statuses, connect } = setup(server.port, {
+      maxAttempts: 2,
+      baseDelayMs: 20,
+      maxDelayMs: 40
+    })
+    try {
+      await connect()
+      await waitFor(() => statuses.includes('connected'))
+      // The device vanishes: the open connection resets and the port stops
+      // accepting, so every retry fails at the transport level.
+      server.resetConnections()
+      server.stopAccepting()
+      await waitFor(() => statuses.includes('closed'), 10_000)
+      expect(statuses.filter((status) => status === 'reconnecting').length).toBe(2)
+      const settled = [...statuses]
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      expect(statuses).toEqual(settled)
     } finally {
       manager.disconnect('rt-reconnect')
       await server.close()

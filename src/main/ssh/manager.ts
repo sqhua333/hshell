@@ -76,6 +76,8 @@ interface Runtime {
   epoch: number
   /** Consecutive reconnect attempts; reset once a connection is ready. */
   attempt: number
+  /** When the current reconnect streak began; null while connected. */
+  reconnectStartedAt: number | null
   retryTimer: NodeJS.Timeout | null
   unacked: number
   paused: boolean
@@ -102,8 +104,23 @@ interface DownloadCounter {
   files: number
 }
 
+/**
+ * Auto-reconnect is bounded: after this many failed attempts the session is
+ * marked as disconnected instead of retrying forever. With the exponential
+ * backoff below the whole window is roughly two minutes.
+ */
 const RETRY_BASE_MS = 1000
 const RETRY_MAX_MS = 30_000
+const RETRY_MAX_ATTEMPTS = 8
+const RETRY_WINDOW_MS = 120_000
+
+export interface ReconnectPolicy {
+  maxAttempts?: number
+  baseDelayMs?: number
+  maxDelayMs?: number
+  /** Give up once this much time has passed since the first drop. */
+  windowMs?: number
+}
 const TRANSFER_CANCELLED = '传输已取消'
 const MAX_TRANSFER_DEPTH = 64
 const MAX_TRANSFER_FILES = 20_000
@@ -148,14 +165,23 @@ export class SshManager {
   private keyboardRequests = new Map<string, PendingKeyboard>()
   private transfers = new Map<string, TransferJob>()
   private readonly tunnels: ForwardService
+  private readonly maxReconnectAttempts: number
+  private readonly retryBaseMs: number
+  private readonly retryMaxMs: number
+  private readonly reconnectWindowMs: number
 
   constructor(
     private readonly knownHosts: KnownHosts,
     private readonly emit: (event: AppEvent) => void,
     private readonly zmodemHost: ZmodemHost = noopZmodemHost,
     private readonly resolveKey?: KeyResolver,
-    private readonly logsDir?: string
+    private readonly logsDir?: string,
+    reconnect: ReconnectPolicy = {}
   ) {
+    this.maxReconnectAttempts = reconnect.maxAttempts ?? RETRY_MAX_ATTEMPTS
+    this.retryBaseMs = reconnect.baseDelayMs ?? RETRY_BASE_MS
+    this.retryMaxMs = reconnect.maxDelayMs ?? RETRY_MAX_MS
+    this.reconnectWindowMs = reconnect.windowMs ?? RETRY_WINDOW_MS
     this.tunnels = new ForwardService((runtimeId) => {
       const rt = this.runtimes.get(runtimeId)
       return rt && rt.authenticated && rt.client ? rt.client : null
@@ -178,6 +204,7 @@ export class SshManager {
       authenticated: false,
       epoch: 0,
       attempt: 0,
+      reconnectStartedAt: null,
       retryTimer: null,
       unacked: 0,
       paused: false,
@@ -412,6 +439,10 @@ export class SshManager {
     rt.client = client
     rt.authenticated = false
     let ready = false
+    // Distinguishes an explicit remote shutdown from a transport failure:
+    // ssh2 reports SSH_MSG_DISCONNECT as an error with a numeric reason, while
+    // a clean QUIT/FIN surfaces as `close` without a preceding error.
+    let sawError = false
 
     client.on('banner', (message) => {
       void message
@@ -428,6 +459,7 @@ export class SshManager {
       rt.authenticated = true
       const wasReconnect = rt.attempt > 0
       rt.attempt = 0
+      rt.reconnectStartedAt = null
       this.emit({ type: 'ssh:status', runtimeId: rt.runtimeId, status: 'connected' })
       if (wasReconnect) {
         this.emit({
@@ -518,6 +550,7 @@ export class SshManager {
 
     client.on('error', (err) => {
       if (rt.client !== client) return
+      sawError = true
       const message = friendlyError(err)
       if (isAuthError(err)) {
         this.fail(rt, message)
@@ -526,6 +559,12 @@ export class SshManager {
         } catch {
           /* ignore */
         }
+        return
+      }
+      // SSH_MSG_DISCONNECT carries a numeric reason code. The host explicitly
+      // said it is going away, so do not keep retrying.
+      if (typeof (err as { code?: unknown }).code === 'number') {
+        this.stopReconnecting(rt, `主机已断开连接：${message}`)
         return
       }
       // Transport-level failures are retried with exponential backoff.
@@ -545,6 +584,13 @@ export class SshManager {
       this.tunnels.stopRuntime(rt.runtimeId)
       this.closeJump(rt)
       if (rt.manualClose || rt.failed) return
+      // A clean close without a socket/protocol error is an explicit
+      // disconnect (for example ssh2's BY_APPLICATION or the peer shutting
+      // down its end). Only transport errors are worth reconnecting.
+      if (!sawError) {
+        this.stopReconnecting(rt, ready ? '主机已关闭连接' : '主机拒绝了连接')
+        return
+      }
       this.handleDisconnect(rt, ready ? '连接已断开' : '无法建立连接')
     })
 
@@ -564,8 +610,17 @@ export class SshManager {
     rt.epoch += 1
     this.closeLog(rt)
     this.closeJump(rt)
+    const now = Date.now()
+    rt.reconnectStartedAt ??= now
     rt.attempt += 1
-    const backoff = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** (rt.attempt - 1))
+    if (
+      rt.attempt > this.maxReconnectAttempts ||
+      now - rt.reconnectStartedAt >= this.reconnectWindowMs
+    ) {
+      this.stopReconnecting(rt, '自动重连超时，已停止重试')
+      return
+    }
+    const backoff = Math.min(this.retryMaxMs, this.retryBaseMs * 2 ** (rt.attempt - 1))
     const delay = backoff + Math.floor(Math.random() * 250)
     this.emit({
       type: 'ssh:status',
@@ -579,6 +634,39 @@ export class SshManager {
       if (rt.manualClose || !this.runtimes.has(rt.runtimeId)) return
       this.open(rt)
     }, delay)
+  }
+
+  /**
+   * Retry budget exhausted: tear the runtime down and report `closed` so the
+   * terminal shows the manual "Reconnect" button instead of silently keeping
+   * a reconnecting session alive forever.
+   */
+  private stopReconnecting(rt: Runtime, message: string): void {
+    if (rt.manualClose || rt.failed) return
+    // `failed` also tells late client/stream callbacks to stand down.
+    rt.failed = true
+    rt.epoch += 1
+    if (rt.retryTimer) {
+      clearTimeout(rt.retryTimer)
+      rt.retryTimer = null
+    }
+    this.tunnels.stopRuntime(rt.runtimeId)
+    this.closeLog(rt)
+    rt.zmodem?.dispose()
+    rt.zmodem = null
+    this.closeJump(rt)
+    const client = rt.client
+    rt.client = null
+    rt.stream = null
+    rt.sftp = null
+    rt.authenticated = false
+    this.flushData(rt)
+    try {
+      client?.end()
+    } catch {
+      /* ignore */
+    }
+    this.emit({ type: 'ssh:status', runtimeId: rt.runtimeId, status: 'closed', message })
   }
 
   private verifyHostKey(

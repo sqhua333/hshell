@@ -39,13 +39,17 @@ export async function reconnectActive(): Promise<void> {
   const pane =
     tab.panes.find((item) => item.runtimeId === state.activeRuntimeId) ?? tab.panes[0]
   if (!pane) return
+  // Split panes may hold different sessions (e.g. SSH + serial), so reconnect
+  // the pane's own session rather than the tab's primary one.
+  const session =
+    state.sessions.find((item) => item.id === pane.sessionId) ?? tab.session
   const handle = getTerminal(pane.runtimeId)
   const cols = handle?.terminal.cols || 80
   const rows = handle?.terminal.rows || 24
   await api.ssh.disconnect(pane.runtimeId)
   state.setStatus(pane.runtimeId, 'connecting')
   try {
-    await api.ssh.connect({ runtimeId: pane.runtimeId, session: tab.session, cols, rows })
+    await api.ssh.connect({ runtimeId: pane.runtimeId, session, cols, rows })
   } catch (error) {
     state.setStatus(pane.runtimeId, 'failed', (error as Error).message)
   }

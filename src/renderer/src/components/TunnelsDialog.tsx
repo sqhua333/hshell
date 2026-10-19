@@ -6,6 +6,10 @@ import { useApp } from '../store'
 import { Icon } from './Icon'
 import { Modal } from './Modal'
 
+// Stable empty list so the zustand selector keeps the same snapshot identity
+// when a runtime has no tunnels yet.
+const NO_TUNNELS: TunnelInfo[] = []
+
 function typeLabel(type: TunnelType): string {
   if (type === 'remote') return tr('远程 -R', 'Remote -R')
   if (type === 'dynamic') return tr('动态 -D', 'Dynamic -D')
@@ -62,7 +66,9 @@ function TunnelsDialogInner(): ReactElement {
     }
     return false
   })
-  const tunnels = useApp((state) => (runtimeId ? state.tunnels[runtimeId] ?? [] : []))
+  const tunnels = useApp((state) =>
+    runtimeId ? state.tunnels[runtimeId] ?? NO_TUNNELS : NO_TUNNELS
+  )
   const setTunnels = useApp((state) => state.setTunnels)
   const addToast = useApp((state) => state.addToast)
 

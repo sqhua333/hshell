@@ -101,6 +101,9 @@ export function TerminalPane({
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
 
   const status = useApp((state) => state.statuses[runtimeId])
+  const connectionStatus = status?.status
+  const statusMessage = status?.message
+  const previousStatusRef = useRef<string | undefined>(undefined)
   const fontSize = useApp((state) => state.fontSize)
   const setActiveRuntime = useApp((state) => state.setActiveRuntime)
   const setStatus = useApp((state) => state.setStatus)
@@ -260,6 +263,58 @@ export function TerminalPane({
     ).theme
   }, [session.terminal.colorScheme, session.terminal.theme])
 
+  // Echo connection state changes into the terminal itself. The status bar and
+  // the overlay pill are easy to miss; a line in the scrollback makes an
+  // unexpected disconnect obvious and tells the user how to get back.
+  useEffect(() => {
+    const previous = previousStatusRef.current
+    previousStatusRef.current = connectionStatus
+    if (!connectionStatus || previous === connectionStatus) return
+    const term = terminalRef.current
+    if (!term) return
+    const notice = (text: string, color = 33): void => {
+      term.write(`\r\n\x1b[${color}m[HShell] ${text}\x1b[0m\r\n`)
+    }
+    if (
+      connectionStatus === 'reconnecting' &&
+      (previous === 'connected' || previous === 'authenticating')
+    ) {
+      notice(
+        tr(
+          '连接已断开，正在自动重连…（Ctrl+Shift+W 可停止重试）',
+          'Connection lost; reconnecting… (Ctrl+Shift+W stops retrying)'
+        )
+      )
+    } else if (connectionStatus === 'connected' && previous === 'reconnecting') {
+      notice(tr('已重新连接到主机。', 'Reconnected to the host.'), 32)
+    } else if (
+      connectionStatus === 'closed' &&
+      (previous === 'connected' || previous === 'reconnecting')
+    ) {
+      notice(
+        tr(
+          `连接已断开${statusMessage ? `：${statusMessage}` : ''}`,
+          `Disconnected${statusMessage ? `: ${statusMessage}` : ''}`
+        )
+      )
+      notice(
+        tr(
+          '按 Ctrl+Shift+R 重新连接，或点击终端中的「重新连接」按钮。',
+          'Press Ctrl+Shift+R or click "Reconnect" in the terminal.'
+        )
+      )
+    } else if (connectionStatus === 'failed' && previous !== 'failed') {
+      notice(
+        tr(
+          `连接失败${statusMessage ? `：${statusMessage}` : ''}`,
+          `Connection failed${statusMessage ? `: ${statusMessage}` : ''}`
+        ),
+        31
+      )
+      notice(tr('按 Ctrl+Shift+R 重试。', 'Press Ctrl+Shift+R to retry.'), 31)
+    }
+  }, [connectionStatus, statusMessage])
+
   useEffect(() => {
     if (!visible) {
       webglRef.current?.dispose()
@@ -376,6 +431,13 @@ export function TerminalPane({
         <div className="terminal-status-pill">
           <span className="spinner" />
           {tr('正在连接', 'Connecting to')} {sessionTarget(session)}…
+        </div>
+      ) : null}
+
+      {currentStatus === 'reconnecting' ? (
+        <div className="terminal-status-pill">
+          <span className="spinner" />
+          {status?.message || tr('正在重连…', 'Reconnecting…')}
         </div>
       ) : null}
 
