@@ -49,12 +49,6 @@ export function AboutDialog(): ReactElement | null {
           <code>{tr('本地 userData（密码不落盘）', 'Local userData (passwords are never persisted)')}</code>
         </div>
       </div>
-      <div className="form-hint">
-        {tr(
-          'HShell 是一个独立的开源实现，与 NetSarang Xshell 无任何关联。',
-          'HShell is an independent open-source implementation and is not affiliated with NetSarang Xshell.'
-        )}
-      </div>
     </Modal>
   )
 }

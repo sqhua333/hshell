@@ -1,7 +1,7 @@
 {
   "name": "hshell",
   "version": "0.1.0",
-  "description": "HShell - a cross-platform SSH and serial client inspired by Xshell",
+  "description": "HShell - a cross-platform SSH and serial client",
   "homepage": "https://example.com/hshell",
   "desktopName": "com.hshell.app.desktop",
   "main": "./out/main/index.js",

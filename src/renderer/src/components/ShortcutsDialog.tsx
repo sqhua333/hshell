@@ -13,7 +13,7 @@ export function ShortcutsDialog(): ReactElement | null {
   return (
     <Modal
       title={tr('键盘快捷键', 'Keyboard shortcuts')}
-      subtitle={tr('Xshell 风格的默认快捷键', 'Xshell-style default shortcuts')}
+      subtitle={tr('默认快捷键', 'Default shortcuts')}
       width={700}
       onClose={() => setOpen(false)}
       footer={

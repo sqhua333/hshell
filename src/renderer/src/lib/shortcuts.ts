@@ -48,7 +48,7 @@ export interface ShortcutGroup {
   items: ShortcutDef[]
 }
 
-// Xshell 风格的默认快捷键。组合键统一小写，mod = Ctrl（macOS 上为 Cmd）。
+// 默认快捷键。组合键统一小写，mod = Ctrl（macOS 上为 Cmd）。
 export const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
     title: '会话与标签', titleEn: 'Sessions & tabs',

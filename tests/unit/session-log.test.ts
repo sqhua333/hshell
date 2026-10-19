@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resolveLogDirectory, SessionLogger } from '../../src/main/storage/session-log'
 
 const dirs: string[] = []
@@ -84,14 +84,30 @@ describe('SessionLogger', () => {
     const logger = new SessionLogger(root, '../..\\evil/name', { format: 'text' })
     logger.close()
     expect(dirname(logger.filePath)).toBe(root)
-    expect(basename(logger.filePath)).toMatch(/name-[0-9a-f]{8}\.log$/)
+    expect(basename(logger.filePath)).toMatch(/^name-\d{8}-\d{6}\.log$/)
   })
 
   it('falls back to a safe name when the label has no usable characters', () => {
     const root = tempDir()
     const logger = new SessionLogger(root, '..', { format: 'text' })
     logger.close()
-    expect(basename(logger.filePath)).toMatch(/^\d{8}-\d{6}-session-[0-9a-f]{8}\.log$/)
+    expect(basename(logger.filePath)).toMatch(/^session-\d{8}-\d{6}\.log$/)
+  })
+
+  it('names files as <session>-<timestamp> and suffixes same-second collisions', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 9, 19, 12, 34, 56))
+    try {
+      const root = tempDir()
+      const first = new SessionLogger(root, 'same', { format: 'text' })
+      const second = new SessionLogger(root, 'same', { format: 'text' })
+      first.close()
+      second.close()
+      expect(basename(first.filePath)).toBe('same-20261019-123456.log')
+      expect(basename(second.filePath)).toBe('same-20261019-123456-2.log')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('ignores writes after close', () => {

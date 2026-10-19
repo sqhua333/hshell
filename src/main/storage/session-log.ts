@@ -9,7 +9,6 @@ import {
   statSync,
   writeSync
 } from 'node:fs'
-import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { isAbsolute, join, normalize } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
@@ -107,8 +106,14 @@ export class SessionLogger {
     this.keepFiles = Math.max(0, Math.min(50, options.keepFiles ?? DEFAULT_KEEP_FILES))
     const safe = sanitizeFileName(this.label) ?? 'session'
     const extension = options.format === 'asciinema' ? 'cast' : 'log'
-    const unique = randomUUID().slice(0, 8)
-    this.basePath = join(directory, `${stamp()}-${safe}-${unique}.${extension}`)
+    // Keep names predictable: <session>-<YYYYMMDD-HHMMSS>.<ext>. A numeric
+    // suffix is only added when two connections would land on the same name.
+    const base = `${safe}-${stamp()}`
+    let filePath = join(directory, `${base}.${extension}`)
+    for (let index = 2; existsSync(filePath); index += 1) {
+      filePath = join(directory, `${base}-${index}.${extension}`)
+    }
+    this.basePath = filePath
     this.filePath = this.basePath
     this.fd = openSync(this.filePath, 'a', 0o600)
     if (options.format === 'asciinema') {

@@ -1255,6 +1255,13 @@ kbd {
   gap: 8px;
 }
 
+/* Keep the trailing action on one line instead of letting it wrap inside a
+   narrow form column. */
+.input-row > .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 /* --------------------------------------------------------------- modals */
 
 .modal-backdrop {

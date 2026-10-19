@@ -1,10 +1,8 @@
 # HShell
 
-一个 Xshell 风格的跨平台 SSH / 串口客户端。Electron + React + xterm.js + ssh2 / serialport，
+跨平台 SSH / 串口客户端。Electron + React + xterm.js + ssh2 / serialport，
 支持多标签终端、会话管理、SFTP、ZMODEM（`rz`/`sz`）、密钥管理、分屏与布局恢复、
 会话日志、端口转发（`-L`/`-R`/`-D`）、串口控制台、中英文界面与快捷键。
-
-> 与 NetSarang Xshell 无任何关联；目录中的 `xshell7.zip` 仅为第三方产品形态参考，项目不使用其任何文件。
 
 ## 快速开始
 
@@ -148,6 +146,7 @@ npm run mock:sshd      # 127.0.0.1:2222
   asciinema v2（`.cast`）。日志默认写入 `userData/logs/`（目录 `0700`、文件 `0600`），
   也可以用「浏览…」为每个会话选择其他文件夹（必须是绝对路径，支持以 `~` 开头；
   留空即使用默认目录）。目录在连接时创建，不可写时会提示「无法创建会话日志」。
+  文件名为 `会话名-YYYYMMDD-HHMMSS.log`（或 `.cast`），同秒重名时追加 `-2`、`-3`。
 - 纯文本日志可勾选「每行添加时间戳」，每行前写入本地时间
   `[YYYY-MM-DD HH:mm:ss]`；空行不添加。asciinema 本身已带相对时间轴，该选项对
   `.cast` 不生效。
@@ -266,7 +265,7 @@ picocom -b 115200 /tmp/ttyB       # 或 cat /tmp/ttyB / echo hello > /tmp/ttyB
 端口冲突、权限不足等错误会直接显示在对话框中；会话断开或重连时自动停止并清理
 全部监听器与已建立的通道。
 
-## 快捷键（Xshell 风格）
+## 快捷键
 
 | 快捷键 | 功能 |
 |---|---|
