@@ -258,12 +258,18 @@ try {
       const gutter = pane.querySelector('.terminal-stamps')
       const container = pane.querySelector('.terminal-container')
       const terminal = pane.querySelector('.xterm')
+      const paneRect = pane.getBoundingClientRect()
+      const containerRect = container?.getBoundingClientRect()
+      const gutterRect = gutter?.getBoundingClientRect()
       return {
         initial,
         count: initial.length,
         hasGutter: !!gutter,
         gutterWidth: gutter ? getComputedStyle(gutter).width : null,
         shifted: !!container?.classList.contains('with-stamps'),
+        containerLeft: container ? getComputedStyle(container).left : null,
+        terminalOffset: containerRect ? containerRect.left - paneRect.left : null,
+        gutterRight: gutterRect ? gutterRect.right - paneRect.left : null,
         gutterOutsideTerminal: !!gutter && !terminal?.contains(gutter),
         allWellFormed: initial.every((value) => /^\\d{2}:\\d{2}:\\d{2}$/.test(value))
       }
@@ -272,6 +278,12 @@ try {
 
   if (!beforeTyping.hasGutter) fail('timestamp gutter missing', beforeTyping)
   if (!beforeTyping.shifted) fail('terminal was not shifted right', beforeTyping)
+  if ((beforeTyping.terminalOffset ?? 0) < 70) {
+    fail('gutter did not move the terminal right', beforeTyping)
+  }
+  if ((beforeTyping.gutterRight ?? 0) > (beforeTyping.terminalOffset ?? 0) + 1) {
+    fail('gutter overlaps the terminal', beforeTyping)
+  }
   if (!beforeTyping.gutterOutsideTerminal) fail('stamps are inside the terminal', beforeTyping)
   if (!beforeTyping.allWellFormed) fail('stamps are not HH:mm:ss', beforeTyping)
 
@@ -322,6 +334,9 @@ try {
         initialStamps: beforeTyping.initial,
         afterTypingStamps: afterTyping.values,
         gutterWidth: beforeTyping.gutterWidth,
+        containerLeft: beforeTyping.containerLeft,
+        terminalOffset: beforeTyping.terminalOffset,
+        gutterRight: beforeTyping.gutterRight,
         plain
       },
       null,
