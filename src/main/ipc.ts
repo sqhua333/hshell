@@ -353,6 +353,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   )
 
   handle('sftp:home', (runtimeId: string) => ssh.sftpHome(String(runtimeId)))
+  handle('sftp:startDir', (runtimeId: string) => ssh.sftpStartDir(String(runtimeId)))
   handle('sftp:list', (runtimeId: string, path: string) => ssh.sftpList(String(runtimeId), String(path)))
   handle('sftp:mkdir', (runtimeId: string, path: string) => ssh.sftpMkdir(String(runtimeId), String(path)))
   handle('sftp:remove', (runtimeId: string, path: string, isDir: boolean) =>

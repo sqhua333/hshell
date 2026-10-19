@@ -410,6 +410,7 @@ export interface HshellApi {
   }
   sftp: {
     home(runtimeId: string): Promise<string>
+    startDir(runtimeId: string): Promise<string>
     list(runtimeId: string, path: string): Promise<FileEntry[]>
     mkdir(runtimeId: string, path: string): Promise<void>
     remove(runtimeId: string, path: string, isDir: boolean): Promise<void>

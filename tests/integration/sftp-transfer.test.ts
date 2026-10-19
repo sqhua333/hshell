@@ -154,6 +154,19 @@ function installFakeSftp(
     sftp.attrs(reqId, attrsOf(node))
   })
 
+  sftp.on('REALPATH', (reqId, path) => {
+    // The client asks for '.' to locate the login home directory.
+    const resolved = norm(path === '.' ? '/home/tester' : path)
+    const node = files.get(resolved)
+    if (!node) {
+      sftp.status(reqId, NO_SUCH_FILE)
+      return
+    }
+    sftp.name(reqId, [
+      { filename: resolved, longname: resolved, attrs: attrsOf(node) }
+    ])
+  })
+
   sftp.on('STAT', (reqId, path) => {
     const node = files.get(norm(path))
     if (!node) sftp.status(reqId, NO_SUCH_FILE)
@@ -387,6 +400,40 @@ afterEach(() => {
 })
 
 describe('SFTP transfers', () => {
+  it('starts in the host desktop directory when it exists', async () => {
+    const server = await startServer()
+    const { manager, statuses, connect } = setup(server.port)
+    server.files.set('/home/tester/Desktop', {
+      type: 'directory',
+      data: Buffer.alloc(0),
+      mode: 0o755,
+      mtime: Date.now()
+    })
+
+    try {
+      await connect()
+      await waitFor(() => statuses.includes('connected'))
+      await expect(manager.sftpStartDir(RUNTIME)).resolves.toBe('/home/tester/Desktop')
+    } finally {
+      manager.disconnect(RUNTIME)
+      await server.close()
+    }
+  }, 30_000)
+
+  it('falls back to the host home directory without a desktop folder', async () => {
+    const server = await startServer()
+    const { manager, statuses, connect } = setup(server.port)
+
+    try {
+      await connect()
+      await waitFor(() => statuses.includes('connected'))
+      await expect(manager.sftpStartDir(RUNTIME)).resolves.toBe('/home/tester')
+    } finally {
+      manager.disconnect(RUNTIME)
+      await server.close()
+    }
+  }, 30_000)
+
   it('uploads atomically and downloads with matching checksums', async () => {
     const server = await startServer()
     const { manager, progress, statuses, connect } = setup(server.port)

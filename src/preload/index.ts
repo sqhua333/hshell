@@ -52,6 +52,7 @@ const api: HshellApi = {
   },
   sftp: {
     home: (runtimeId) => ipcRenderer.invoke('sftp:home', runtimeId),
+    startDir: (runtimeId) => ipcRenderer.invoke('sftp:startDir', runtimeId),
     list: (runtimeId, path) => ipcRenderer.invoke('sftp:list', runtimeId, path),
     mkdir: (runtimeId, path) => ipcRenderer.invoke('sftp:mkdir', runtimeId, path),
     remove: (runtimeId, path, isDir) => ipcRenderer.invoke('sftp:remove', runtimeId, path, isDir),

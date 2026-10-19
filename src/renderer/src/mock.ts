@@ -105,6 +105,7 @@ function buildRemoteTree(): Map<string, FileEntry> {
     tree.set(path, makeEntry(path, type, size))
   }
   add(`${HOME}`, 'directory')
+  add(`${HOME}/Desktop`, 'directory')
   add(`${HOME}/projects`, 'directory')
   add(`${HOME}/projects/hshell`, 'directory')
   add(`${HOME}/projects/hshell/src`, 'directory')
@@ -527,6 +528,13 @@ export function createMockApi(): HshellApi {
     },
     sftp: {
       home: async () => HOME,
+      startDir: async () => {
+        for (const name of ['Desktop', '桌面']) {
+          const candidate = `${HOME}/${name}`
+          if (remoteTree.get(candidate)?.type === 'directory') return candidate
+        }
+        return HOME
+      },
       list: async (_runtimeId, path) => listTree(remoteTree, path),
       mkdir: async (_runtimeId, path) => {
         const target = normalizePath(path)

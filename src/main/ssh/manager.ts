@@ -999,6 +999,30 @@ export class SshManager {
     })
   }
 
+  /**
+   * Directory the SFTP remote pane opens in: the host's desktop folder when it
+   * exists, otherwise the login home. Localized desktops (e.g. Chinese `桌面`)
+   * are covered so the pane lands somewhere useful on non-English hosts.
+   */
+  async sftpStartDir(runtimeId: string): Promise<string> {
+    const home = await this.sftpHome(runtimeId)
+    const sftp = await this.getSftp(runtimeId)
+    for (const name of ['Desktop', '桌面']) {
+      const candidate = home === '/' ? `/${name}` : posix.join(home, name)
+      const isDir = await new Promise<boolean>((resolvePromise) => {
+        sftp.stat(candidate, (err, attrs) => {
+          if (err || !attrs) {
+            resolvePromise(false)
+            return
+          }
+          resolvePromise(typeof attrs.isDirectory === 'function' ? attrs.isDirectory() : false)
+        })
+      })
+      if (isDir) return candidate
+    }
+    return home
+  }
+
   async sftpList(runtimeId: string, path: string): Promise<FileEntry[]> {
     const sftp = await this.getSftp(runtimeId)
     const dir = normalizeRemotePath(path)

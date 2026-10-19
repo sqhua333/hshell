@@ -647,7 +647,8 @@ mac:
   导出 / 导入 JSON 会话包（默认不含密钥，可选口令加密私钥）；`~/.ssh/config`
   导入（Host/HostName/User/Port/IdentityFile/ProxyJump，自动去重）。
 - **SFTP**：远程目录浏览、上传 / 下载（含递归）、新建目录、重命名、删除、chmod；
-  本地面板同等的目录操作。传输使用临时名（`.hshell-upload-*` / `.hshell-download-*`）
+  本地面板同等的目录操作。远程面板默认打开主机桌面目录（`~/Desktop`，兼容本地化
+  的 `~/桌面`），桌面目录不存在时回退到登录主目录。传输使用临时名（`.hshell-upload-*` / `.hshell-download-*`）
   流式写入后原子 rename，实时进度（字节 / 百分比）显示在面板与状态栏，可随时取消并
   清理临时文件；断线时自动取消该会话的全部传输。远程路径强制绝对路径、拒绝 `..`
   与控制字符；下载文件名经 Windows 保留名 / 控制字符消毒，并做本地目录包含校验，
@@ -723,7 +724,7 @@ mac:
   `serial.list()` 并枚举真实设备。Windows
   `--dir` 产物已生成并检查；NSIS 安装包在 Linux 上交叉构建需要 wine（本机未安装），
   macOS 产物需要 macOS 主机，二者由 `.github/workflows/build.yml` 在 CI 中构建。
-- **验证**：`npm run typecheck` 通过；默认 192 个测试通过（171 个单元 + 21 个集成
+- **验证**：`npm run typecheck` 通过；默认 194 个测试通过（171 个单元 + 23 个集成
   测试；覆盖迁移、导出导入往返、文件夹环、ssh config、ZMODEM 双向协议、断线自动
   重连、重连预算耗尽后自动断开、主机明确断开时不重连、认证失败不重试、
   保险库加解密与 safeStorage 回退、密钥生成/导入/去重、

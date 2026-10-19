@@ -241,9 +241,9 @@ export function SftpPanel(): ReactElement {
     }
     let cancelled = false
     void api.sftp
-      .home(activeRuntimeId)
-      .then((home) => {
-        if (!cancelled) void loadRemote(home)
+      .startDir(activeRuntimeId)
+      .then((dir) => {
+        if (!cancelled) void loadRemote(dir)
       })
       .catch((error: Error) => {
         if (!cancelled) addToast('error', `${tr('SFTP 初始化失败：', 'Failed to initialize SFTP: ')}${error.message}`)
