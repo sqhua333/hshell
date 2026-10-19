@@ -28,6 +28,7 @@ import {
   type SplitSide
 } from './lib/pane-layout'
 import { generateReplayScript, recorder, replayFileName } from './lib/recorder'
+import { clampSidebarWidth, SIDEBAR_DEFAULT_PX } from './lib/sidebar-width'
 
 export type { LayoutNode, PaneNode, PaneState, SplitNode } from './lib/pane-layout'
 
@@ -95,6 +96,7 @@ interface AppState {
 
   sidebarVisible: boolean
   sidebarAutoHide: boolean
+  sidebarWidth: number
   sftpVisible: boolean
   searchVisible: boolean
   searchFocusNonce: number
@@ -163,6 +165,7 @@ interface AppState {
 
   toggleSidebar(): void
   toggleSidebarAutoHide(): void
+  setSidebarWidth(width: number): void
   toggleSftp(): void
   setSearchVisible(visible: boolean): void
   focusSearch(): void
@@ -236,6 +239,15 @@ function writeFlag(key: string, value: boolean): void {
   }
 }
 
+function readSidebarWidth(): number {
+  try {
+    const value = Number(localStorage.getItem('hshell.sidebarWidth'))
+    return Number.isFinite(value) && value > 0 ? clampSidebarWidth(value) : SIDEBAR_DEFAULT_PX
+  } catch {
+    return SIDEBAR_DEFAULT_PX
+  }
+}
+
 function sessionForRuntime(runtimeId: string, state: AppState): Session | null {
   const tab = state.tabs.find((item) => item.panes.some((pane) => pane.runtimeId === runtimeId))
   if (!tab) return null
@@ -295,6 +307,7 @@ export const useApp = create<AppState>((set, get) => ({
   lastSessionId: null,
   sidebarVisible: true,
   sidebarAutoHide: readFlag('hshell.sidebarAutoHide', false),
+  sidebarWidth: readSidebarWidth(),
   sftpVisible: false,
   searchVisible: false,
   searchFocusNonce: 0,
@@ -704,6 +717,16 @@ export const useApp = create<AppState>((set, get) => ({
     const next = !get().sidebarAutoHide
     writeFlag('hshell.sidebarAutoHide', next)
     set({ sidebarAutoHide: next })
+  },
+
+  setSidebarWidth(width) {
+    const next = clampSidebarWidth(width)
+    set({ sidebarWidth: next })
+    try {
+      localStorage.setItem('hshell.sidebarWidth', String(next))
+    } catch {
+      /* ignore */
+    }
   },
 
   toggleSftp() {

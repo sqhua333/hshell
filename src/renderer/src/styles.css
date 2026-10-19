@@ -217,7 +217,7 @@ kbd {
 .sidebar {
   display: flex;
   flex-direction: column;
-  width: 252px;
+  width: var(--sidebar-width, 252px);
   min-height: 0;
   background: var(--panel);
   border-right: 1px solid var(--border);
@@ -2101,7 +2101,7 @@ kbd {
 }
 
 .sidebar.auto-hide:hover {
-  width: 252px;
+  width: var(--sidebar-width, 252px);
   cursor: default;
   box-shadow: 8px 0 24px rgba(0, 0, 0, 0.18);
 }
@@ -2113,6 +2113,39 @@ kbd {
 
 .sidebar.auto-hide:hover::after {
   display: none;
+}
+
+/* Drag the right edge to resize the session manager. The 6px strip sits just
+   outside the border so it does not steal clicks from the session tree. */
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  z-index: 6;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  background: transparent;
+  touch-action: none;
+}
+
+.sidebar-resizer:hover,
+.sidebar.resizing .sidebar-resizer {
+  background: var(--accent);
+  opacity: 0.45;
+}
+
+.sidebar.resizing {
+  transition: none;
+}
+
+.sidebar.auto-hide .sidebar-resizer {
+  display: none;
+}
+
+body.resizing-sidebar {
+  cursor: col-resize;
+  user-select: none;
 }
 
 /* Terminal pane and the per-session dock share a column. */

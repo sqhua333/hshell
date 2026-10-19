@@ -2,7 +2,9 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactElement
 } from 'react'
 import type { Folder, Session } from '@shared/types'
@@ -10,6 +12,7 @@ import { sessionTarget } from '@shared/session'
 import { api } from '../api'
 import { tr } from '../lib/i18n'
 import { setSessionDragData } from '../lib/session-drag'
+import { SIDEBAR_DEFAULT_PX } from '../lib/sidebar-width'
 import { useApp } from '../store'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 import { Icon } from './Icon'
@@ -36,7 +39,9 @@ export function SessionSidebar(): ReactElement {
   const reloadSessions = useApp((state) => state.reloadSessions)
   const addToast = useApp((state) => state.addToast)
   const sidebarAutoHide = useApp((state) => state.sidebarAutoHide)
+  const sidebarWidth = useApp((state) => state.sidebarWidth)
   const toggleSidebarAutoHide = useApp((state) => state.toggleSidebarAutoHide)
+  const setSidebarWidth = useApp((state) => state.setSidebarWidth)
   const activeSessionId = useApp((state) => {
     const tab = state.tabs.find((item) => item.id === state.activeTabId)
     return tab?.session.id ?? null
@@ -57,6 +62,17 @@ export function SessionSidebar(): ReactElement {
   const [exportError, setExportError] = useState('')
   const [busy, setBusy] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
+  const [resizing, setResizing] = useState(false)
+  const resizeOrigin = useRef<{ x: number; width: number } | null>(null)
+  const resizeCleanup = useRef<(() => void) | null>(null)
+
+  useEffect(
+    () => () => {
+      resizeCleanup.current?.()
+      document.body.classList.remove('resizing-sidebar')
+    },
+    []
+  )
 
   useEffect(() => {
     if (searchFocusNonce > 0) {
@@ -380,8 +396,55 @@ export function SessionSidebar(): ReactElement {
     .sort((a, b) => a.sortOrder - b.sortOrder)
   const rootSessions = sessions.filter((session) => session.folderId === null)
 
+  function startResize(event: ReactPointerEvent<HTMLDivElement>): void {
+    if (sidebarAutoHide) return
+    event.preventDefault()
+    resizeOrigin.current = { x: event.clientX, width: sidebarWidth }
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId)
+    } catch {
+      /* window listeners below still track the drag */
+    }
+    setResizing(true)
+    document.body.classList.add('resizing-sidebar')
+
+    // Attach the drag listeners synchronously: pointer capture is not reliable
+    // for every input source, and the cursor leaves the 6px handle immediately.
+    resizeCleanup.current?.()
+    function move(moveEvent: PointerEvent): void {
+      const origin = resizeOrigin.current
+      if (!origin) return
+      setSidebarWidth(origin.width + moveEvent.clientX - origin.x)
+    }
+    function end(): void {
+      resizeOrigin.current = null
+      setResizing(false)
+      document.body.classList.remove('resizing-sidebar')
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', end)
+      resizeCleanup.current = null
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', end)
+    window.addEventListener('pointercancel', end)
+    resizeCleanup.current = end
+  }
+
   return (
-    <aside className={`sidebar ${sidebarAutoHide ? 'auto-hide' : ''}`}>
+    <aside
+      className={`sidebar ${sidebarAutoHide ? 'auto-hide' : ''} ${resizing ? 'resizing' : ''}`}
+      style={{ '--sidebar-width': `${sidebarWidth}px` } as CSSProperties}
+    >
+      <div
+        className="sidebar-resizer"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={tr('调整会话管理器宽度', 'Resize session manager')}
+        title={tr('拖动调整宽度，双击恢复默认', 'Drag to resize, double-click to reset')}
+        onPointerDown={startResize}
+        onDoubleClick={() => setSidebarWidth(SIDEBAR_DEFAULT_PX)}
+      />
       <div className="sidebar-header">
         <span className="sidebar-title">{tr('会话管理器', 'Session Manager')}</span>
         <div className="sidebar-header-actions">
