@@ -22,6 +22,7 @@ HSHELL_HOST=0.0.0.0 npm run dev:web     # 供 Windows / 局域网访问（见下
 npm run typecheck
 npm run test
 npm run build
+npm run e2e:drag-split                  # 拖拽分屏 UI 检查（需先构建，无头运行）
 ```
 
 如果环境里设置了 `ELECTRON_RUN_AS_NODE=1`（某些 IDE 会注入），启动 Electron 时使用：

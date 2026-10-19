@@ -23,6 +23,7 @@
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:dir": "npm run build && electron-builder --dir",
     "smoke:packaged": "node scripts/smoke-packaged.mjs",
+    "e2e:drag-split": "node scripts/e2e-drag-split.mjs",
     "icon": "python3 scripts/gen-icon.py"
   },
   "devDependencies": {
