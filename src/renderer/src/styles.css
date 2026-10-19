@@ -619,6 +619,35 @@ kbd {
   inset: 0;
 }
 
+.terminal-container.with-stamps {
+  left: 78px;
+}
+
+.terminal-stamps {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 4;
+  width: 78px;
+  padding-right: 8px;
+  box-sizing: border-box;
+  overflow: hidden;
+  font-family:
+    "JetBrains Mono", "Cascadia Mono", "Fira Code", Menlo, Consolas, "Noto Sans Mono CJK SC",
+    monospace;
+  font-size: 11px;
+  text-align: right;
+  opacity: 0.5;
+  pointer-events: none;
+  user-select: none;
+}
+
+.terminal-stamp {
+  overflow: hidden;
+  white-space: nowrap;
+}
+
 .terminal-container .xterm {
   height: 100%;
 }

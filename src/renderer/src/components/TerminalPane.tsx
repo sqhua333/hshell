@@ -13,6 +13,7 @@ import { matchShortcut } from '../lib/shortcuts'
 import { findHighlightLines, OutputRuleEngine, stripAnsi } from '../lib/output-rules'
 import { recorder } from '../lib/recorder'
 import { subscribeRuntimeData } from '../lib/runtime-bus'
+import { formatClock } from '../lib/terminal-stamps'
 import { registerTerminal } from '../lib/terminal-registry'
 import { useApp } from '../store'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
@@ -23,8 +24,15 @@ interface AppliedDecoration {
   marker: IMarker
 }
 
+interface LineStamp {
+  marker: IMarker
+  text: string
+}
+
 const HIGHLIGHT_BACKGROUND = '#ffd54f'
 const MAX_DECORATIONS = 400
+/** Bound the marker list; disposed markers are pruned on every repaint. */
+const MAX_LINE_STAMPS = 2000
 
 /** Decorate whole lines that match a highlight rule. */
 function applyHighlights(
@@ -97,6 +105,11 @@ export function TerminalPane({
   const sessionRef = useRef(session)
   const triggerEngineRef = useRef(new OutputRuleEngine<TriggerRule>(1500))
   const decorationsRef = useRef<AppliedDecoration[]>([])
+  const stampsRef = useRef<HTMLDivElement>(null)
+  const stampsScheduleRef = useRef<(() => void) | null>(null)
+  const showTimestamps = session.terminal.showTimestamps ?? false
+  const stampsEnabledRef = useRef(showTimestamps)
+  stampsEnabledRef.current = showTimestamps
   sessionRef.current = session
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
 
@@ -163,9 +176,95 @@ export function TerminalPane({
       void api.ssh.write(runtimeId, data)
     }
 
+    // Timestamp gutter: markers follow lines as scrollback trims, so the
+    // overlay only needs each marker's current line number.
+    const lineStamps: LineStamp[] = []
+    let lastStampMarker: IMarker | null = null
+    let stampsRaf = 0
+    let stampsSignature = ''
+
+    const stampLine = (): void => {
+      if (!stampsEnabledRef.current) return
+      const buffer = term.buffer.active
+      const currentLine = buffer.baseY + buffer.cursorY
+      if (lastStampMarker && !lastStampMarker.isDisposed && lastStampMarker.line === currentLine) {
+        return
+      }
+      try {
+        const marker = term.registerMarker(0)
+        if (!marker) return
+        lineStamps.push({ marker, text: formatClock() })
+        lastStampMarker = marker
+        while (lineStamps.length > MAX_LINE_STAMPS) lineStamps.shift()?.marker.dispose()
+      } catch {
+        /* terminal may be disposing while output is in flight */
+      }
+    }
+
+    const renderStamps = (): void => {
+      stampsRaf = 0
+      const host = stampsRef.current
+      if (!host) return
+      if (!stampsEnabledRef.current) {
+        if (host.childElementCount) host.replaceChildren()
+        stampsSignature = ''
+        return
+      }
+      const buffer = term.buffer.active
+      const screen = term.element?.querySelector('.xterm-screen')
+      const cellHeight =
+        screen && term.rows > 0 ? screen.getBoundingClientRect().height / term.rows : 0
+      if (lineStamps.length > 200) {
+        for (let index = lineStamps.length - 1; index >= 0; index -= 1) {
+          if (lineStamps[index].marker.isDisposed) lineStamps.splice(index, 1)
+        }
+      }
+      const byLine = new Map<number, string>()
+      for (const item of lineStamps) {
+        if (!item.marker.isDisposed) byLine.set(item.marker.line, item.text)
+      }
+      const rows: Array<{ text: string }> = []
+      const signature: string[] = []
+      for (let row = 0; row < term.rows; row += 1) {
+        const line = buffer.viewportY + row
+        // A wrapped continuation shares the logical line; the stamp belongs
+        // on its first visual row only.
+        const wrapped = buffer.getLine(line)?.isWrapped ?? false
+        const text = wrapped ? '' : (byLine.get(line) ?? '')
+        rows.push({ text })
+        signature.push(`${line}:${wrapped ? 1 : 0}:${text}`)
+      }
+      const next = `${cellHeight}|${rows.length}|${signature.join('|')}`
+      if (next === stampsSignature && host.childElementCount === rows.length) return
+      stampsSignature = next
+      const fragment = document.createDocumentFragment()
+      for (const row of rows) {
+        const element = document.createElement('div')
+        element.className = 'terminal-stamp'
+        if (cellHeight) {
+          element.style.height = `${cellHeight}px`
+          element.style.lineHeight = `${cellHeight}px`
+        }
+        element.textContent = row.text
+        fragment.appendChild(element)
+      }
+      host.replaceChildren(fragment)
+    }
+    const scheduleStamps = (): void => {
+      if (!stampsRaf) stampsRaf = requestAnimationFrame(renderStamps)
+    }
+    stampsScheduleRef.current = scheduleStamps
+
+    const lineFeedDisposable = term.onLineFeed(stampLine)
+    const renderDisposable = term.onRender(scheduleStamps)
+    const scrollDisposable = term.onScroll(() => scheduleStamps())
+
     const unsubscribeData = subscribeRuntimeData(runtimeId, (data) => {
       const text = decoder.decode(data, { stream: true })
       recorder.recordOutput(runtimeId, text)
+      // Mark the line before this chunk is parsed when output starts at column
+      // zero (first prompt, or a chunk beginning a new line).
+      if (stampsEnabledRef.current && term.buffer.active.cursorX === 0) stampLine()
       term.write(data, () => {
         void api.ssh.ack(runtimeId, data.byteLength)
         applyHighlights(term, text, sessionRef.current, decorationsRef.current)
@@ -229,6 +328,12 @@ export function TerminalPane({
       unsubscribeData()
       dataDisposable.dispose()
       resizeDisposable.dispose()
+      lineFeedDisposable.dispose()
+      renderDisposable.dispose()
+      scrollDisposable.dispose()
+      if (stampsRaf) cancelAnimationFrame(stampsRaf)
+      stampsRaf = 0
+      stampsScheduleRef.current = null
       unregister()
       decorationsRef.current.forEach((item) => item.decoration.dispose())
       decorationsRef.current = []
@@ -252,8 +357,25 @@ export function TerminalPane({
       } catch {
         /* ignore */
       }
+      stampsScheduleRef.current?.()
     })
   }, [fontSize])
+
+  // Toggling the gutter changes the terminal width, so refit and repaint.
+  useEffect(() => {
+    const term = terminalRef.current
+    if (!term) return
+    const raf = requestAnimationFrame(() => {
+      try {
+        fitRef.current?.fit()
+      } catch {
+        /* ignore */
+      }
+      stampsScheduleRef.current?.()
+      if (showTimestamps) term.refresh(0, term.rows - 1)
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [showTimestamps])
 
   useEffect(() => {
     const term = terminalRef.current
@@ -413,7 +535,21 @@ export function TerminalPane({
         setMenu({ x: event.clientX, y: event.clientY })
       }}
     >
-      <div className="terminal-container" ref={containerRef} />
+      {showTimestamps ? (
+        <div
+          className="terminal-stamps"
+          ref={stampsRef}
+          aria-hidden="true"
+          style={{
+            color: resolveColorScheme(session.terminal.colorScheme, session.terminal.theme)
+              .theme.foreground
+          }}
+        />
+      ) : null}
+      <div
+        className={`terminal-container${showTimestamps ? ' with-stamps' : ''}`}
+        ref={containerRef}
+      />
 
       {showClose ? (
         <button

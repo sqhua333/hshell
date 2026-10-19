@@ -109,6 +109,9 @@ function SessionDialogInner({
     resolveColorScheme(initial?.terminal.colorScheme, initial?.terminal.theme).id
   )
   const [fontSize, setFontSize] = useState(String(initial?.terminal.fontSize ?? 14))
+  const [showTimestamps, setShowTimestamps] = useState(
+    initial?.terminal.showTimestamps ?? false
+  )
   const [quickCommands, setQuickCommands] = useState<QuickCommand[]>(
     initial?.quickCommands?.map((item) => ({ ...item })) ?? []
   )
@@ -302,7 +305,8 @@ function SessionDialogInner({
         term: initial?.terminal.term ?? 'xterm-256color',
         theme: legacyThemeForScheme(colorScheme),
         fontSize: Math.max(8, Math.min(40, Number(fontSize) || 14)),
-        colorScheme
+        colorScheme,
+        showTimestamps: showTimestamps || undefined
       },
       quickCommands: cleanQuick.length ? cleanQuick : undefined,
       triggers: cleanTriggers.length ? cleanTriggers : undefined,
@@ -802,10 +806,29 @@ function SessionDialogInner({
                 ))}
                 <em>{tr(selectedScheme.name, selectedScheme.nameEn)}</em>
               </div>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={showTimestamps}
+                  onChange={(event) => setShowTimestamps(event.target.checked)}
+                />
+                <span>
+                  {tr(
+                    '在终端左侧显示每行时间戳（本地时间 HH:mm:ss）',
+                    'Show a local HH:mm:ss timestamp beside each output line'
+                  )}
+                </span>
+              </label>
               <div className="form-hint">
                 {tr(
                   '每个会话可使用独立的配色方案；界面深/浅主题不会覆盖终端配色。终端类型固定为 xterm-256color，编码固定为 UTF-8。',
                   'Each session keeps its own palette; the light/dark UI theme does not override it. Terminal type is fixed to xterm-256color and encoding to UTF-8.'
+                )}
+              </div>
+              <div className="form-hint">
+                {tr(
+                  '时间戳显示在终端左侧的独立栏中，不写入终端内容，复制文本时不会包含；新输出的行才会标注时间。',
+                  'Timestamps live in a separate gutter and are not part of the terminal buffer, so copying text never includes them. Only newly output lines are stamped.'
                 )}
               </div>
 

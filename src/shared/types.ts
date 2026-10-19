@@ -21,6 +21,8 @@ export interface TerminalOptions {
   fontSize: number
   /** Built-in color scheme id; falls back to `theme` for older sessions. */
   colorScheme?: string
+  /** Show a local `HH:mm:ss` gutter next to each output line. */
+  showTimestamps?: boolean
 }
 
 /** Command button shown in the per-session bar at the bottom of the terminal. */

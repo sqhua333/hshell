@@ -13,7 +13,8 @@ export const terminalOptionsSchema = z.object({
   term: z.string().min(1).max(64).default('xterm-256color'),
   theme: z.enum(['dark', 'light', 'solarized']).default('dark'),
   fontSize: z.number().int().min(8).max(40).default(14),
-  colorScheme: z.string().min(1).max(40).optional()
+  colorScheme: z.string().min(1).max(40).optional(),
+  showTimestamps: z.boolean().optional()
 })
 
 const colorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/, '颜色必须是 #rrggbb 格式')

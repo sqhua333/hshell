@@ -23,6 +23,7 @@ npm run typecheck
 npm run test
 npm run build
 npm run e2e:drag-split                  # 拖拽分屏 UI 检查（需先构建，无头运行）
+npm run e2e:timestamps                  # 终端时间戳栏 UI 检查（需先构建，无头运行）
 ```
 
 如果环境里设置了 `ELECTRON_RUN_AS_NODE=1`（某些 IDE 会注入），启动 Electron 时使用：
@@ -153,6 +154,10 @@ npm run mock:sshd      # 127.0.0.1:2222
 - 每秒或每 64KB 刷新一次，关闭时强制 flush；单文件达到 10MB 后轮转并保留 5 份。
   asciinema 日志可用 `asciinema play <file>.cast` 回放。
 - ZMODEM 协议字节不会写入日志，只有终端显示内容会被记录。
+- 如果只想在界面上看时间：会话属性 →「终端」勾选「在终端左侧显示每行时间戳」，
+  新输出的行会在 xterm 左侧显示本地 `HH:mm:ss`。时间戳栏独立于终端缓冲区，复制、
+  查找和触发器都看不到它；滚动或回看历史时仍与对应行对齐，自动换行的续行只在
+  逻辑行首显示。该设置对 SSH、串口和分屏面板都生效，修改后立即应用。
 - 标签与嵌套分屏树（方向、面板顺序、尺寸）会保存到 `userData/layouts.json`，并
   兼容旧版平面布局文件。重启后布局自动恢复，但面板不会自动连接：每个恢复的面板
   显示「已恢复上次布局 / 连接」按钮，点击后才建立 SSH 连接。已删除的会话会自动从
