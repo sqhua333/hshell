@@ -74,7 +74,9 @@ export const sessionSchema = z.object({
   logging: z
     .object({
       enabled: z.boolean(),
-      format: z.enum(['text', 'asciinema'])
+      format: z.enum(['text', 'asciinema']),
+      directory: z.string().max(4096).optional(),
+      timestamps: z.boolean().optional()
     })
     .optional(),
   color: z.string().max(32).optional(),

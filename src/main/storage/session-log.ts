@@ -10,7 +10,8 @@ import {
   writeSync
 } from 'node:fs'
 import { randomUUID } from 'node:crypto'
-import { join } from 'node:path'
+import { homedir } from 'node:os'
+import { isAbsolute, join, normalize } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import { sanitizeFileName } from './path-safety'
 
@@ -25,6 +26,26 @@ export interface SessionLogOptions {
   maxBytes?: number
   /** Number of rotated files to keep. */
   keepFiles?: number
+  /** Prefix every text-log line with a local timestamp. */
+  timestamps?: boolean
+}
+
+/**
+ * Directory for a session's logs. A configured folder is used verbatim (after
+ * expanding a leading `~`); relative paths are rejected so a typo cannot
+ * scatter logs into the process working directory. An empty value keeps the
+ * application default.
+ */
+export function resolveLogDirectory(configured: string | undefined, fallback: string): string {
+  const trimmed = configured?.trim()
+  if (!trimmed) return fallback
+  if (trimmed.includes('\0')) throw new Error('日志目录包含非法字符')
+  const expanded =
+    trimmed === '~' || /^~[\\/]/.test(trimmed)
+      ? join(homedir(), trimmed.slice(1).replace(/^[\\/]/, ''))
+      : trimmed
+  if (!isAbsolute(expanded)) throw new Error('日志目录必须是绝对路径')
+  return normalize(expanded)
 }
 
 const DEFAULT_MAX_BYTES = 10 * 1024 * 1024
@@ -46,6 +67,16 @@ function stamp(): string {
   ].join('')
 }
 
+/** Human-readable prefix for lines in timestamped text logs. */
+function lineStamp(): string {
+  const date = new Date()
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return (
+    `[${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}] `
+  )
+}
+
 /**
  * Writes a session recording to a 0600 file inside a 0700 directory.
  * Text mode stores terminal output verbatim; asciinema mode stores the
@@ -61,6 +92,7 @@ export class SessionLogger {
   private startedAt = Date.now()
   private timer: NodeJS.Timeout | null = null
   private closed = false
+  private atLineStart = true
   private readonly maxBytes: number
   private readonly keepFiles: number
   private readonly basePath: string
@@ -103,12 +135,34 @@ export class SessionLogger {
     if (!text) return
     if (this.options.format === 'asciinema') {
       const elapsed = (Date.now() - this.startedAt) / 1000
-      this.buffer.push(Buffer.from(`${JSON.stringify([elapsed, 'o', text])}\n`, 'utf8'))
+      const line = `${JSON.stringify([elapsed, 'o', text])}\n`
+      this.buffer.push(Buffer.from(line, 'utf8'))
+      this.bufferedBytes += line.length
     } else {
-      this.buffer.push(Buffer.from(text, 'utf8'))
+      // asciinema events already carry elapsed time, so timestamps only apply
+      // to plain-text logs.
+      const payload = this.options.timestamps ? this.stampLines(text) : text
+      this.buffer.push(Buffer.from(payload, 'utf8'))
+      this.bufferedBytes += payload.length
     }
-    this.bufferedBytes += text.length
     if (this.bufferedBytes >= BUFFER_BYTES) this.flush()
+  }
+
+  /**
+   * Insert a timestamp at the start of every non-empty line. Output arrives in
+   * arbitrary chunks, so remember whether the previous chunk ended a line.
+   */
+  private stampLines(text: string): string {
+    const parts = text.split('\n')
+    let out = ''
+    for (let index = 0; index < parts.length; index += 1) {
+      if (index > 0) out += '\n'
+      const startsLine = index > 0 || this.atLineStart
+      if (startsLine && parts[index].length > 0) out += lineStamp()
+      out += parts[index]
+    }
+    this.atLineStart = text.endsWith('\n')
+    return out
   }
 
   flush(): void {

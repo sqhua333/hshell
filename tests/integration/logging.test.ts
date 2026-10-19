@@ -11,7 +11,11 @@ import { SshManager } from '../../src/main/ssh/manager'
 const RUNTIME = 'rt-logging'
 const RECORDED = 'recorded-line\r\n'
 
-function baseSession(port: number, format: LogFormat): Session {
+function baseSession(
+  port: number,
+  format: LogFormat,
+  logging?: { directory?: string; timestamps?: boolean }
+): Session {
   return {
     id: 's-logging',
     name: 'logging test',
@@ -21,7 +25,7 @@ function baseSession(port: number, format: LogFormat): Session {
     username: 'tester',
     auth: { method: 'password', password: 'anything' },
     terminal: { term: 'xterm-256color', theme: 'dark', fontSize: 14 },
-    logging: { enabled: true, format },
+    logging: { enabled: true, format, ...logging },
     createdAt: 0,
     updatedAt: 0
   }
@@ -102,15 +106,19 @@ afterEach(async () => {
   for (const task of cleanup.splice(0).reverse()) await task()
 })
 
-async function record(format: LogFormat): Promise<{ content: string; extension: string }> {
+async function record(
+  format: LogFormat,
+  logging?: { directory?: string; timestamps?: boolean }
+): Promise<{ content: string; extension: string; directory: string }> {
   const server = await startServer()
   const { manager, logsDir, output, statuses } = setup()
   cleanup.push(() => server.close())
   cleanup.push(() => manager.disconnect(RUNTIME))
+  const directory = logging?.directory ?? logsDir
 
   await manager.connect({
     runtimeId: RUNTIME,
-    session: baseSession(server.port, format),
+    session: baseSession(server.port, format, logging),
     cols: 80,
     rows: 24
   })
@@ -118,11 +126,12 @@ async function record(format: LogFormat): Promise<{ content: string; extension: 
   await waitFor(() => output.join('').includes('recorded-line'))
 
   manager.disconnect(RUNTIME)
-  const files = readdirSync(logsDir)
+  const files = readdirSync(directory)
   expect(files).toHaveLength(1)
   return {
-    content: readFileSync(join(logsDir, files[0]), 'utf8'),
-    extension: files[0].split('.').pop() ?? ''
+    content: readFileSync(join(directory, files[0]), 'utf8'),
+    extension: files[0].split('.').pop() ?? '',
+    directory
   }
 }
 
@@ -131,6 +140,17 @@ describe('session logging', () => {
     const { content, extension } = await record('text')
     expect(extension).toBe('log')
     expect(content).toContain('recorded-line')
+  }, 30_000)
+
+  it('honors a custom log directory and timestamped text logs', async () => {
+    const custom = mkdtempSync(join(tmpdir(), 'hshell-custom-logs-'))
+    const { content, extension, directory } = await record('text', {
+      directory: custom,
+      timestamps: true
+    })
+    expect(directory).toBe(custom)
+    expect(extension).toBe('log')
+    expect(content).toMatch(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] recorded-line\r\n$/)
   }, 30_000)
 
   it('records shell output in asciinema v2 format', async () => {

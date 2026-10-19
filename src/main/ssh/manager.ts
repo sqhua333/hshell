@@ -28,7 +28,7 @@ import type {
   TunnelConfig,
   TunnelInfo
 } from '@shared/types'
-import { SessionLogger } from '../storage/session-log'
+import { resolveLogDirectory, SessionLogger } from '../storage/session-log'
 import { ForwardService } from './forward-service'
 import { parseProxyJump, type JumpHop } from './jump'
 import { KnownHosts, fingerprintOf, parseKeyAlgorithm } from './known-hosts'
@@ -898,8 +898,10 @@ export class SshManager {
     const config = rt.session.logging
     if (!config?.enabled || !this.logsDir || rt.log) return
     try {
-      rt.log = new SessionLogger(this.logsDir, `${rt.session.name}-${rt.runtimeId}`, {
+      const directory = resolveLogDirectory(config.directory, this.logsDir)
+      rt.log = new SessionLogger(directory, `${rt.session.name}-${rt.runtimeId}`, {
         format: config.format,
+        timestamps: config.timestamps,
         cols: rt.cols,
         rows: rt.rows,
         term: rt.session.terminal.term

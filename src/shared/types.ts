@@ -61,6 +61,13 @@ export type LogFormat = 'text' | 'asciinema'
 export interface LoggingOptions {
   enabled: boolean
   format: LogFormat
+  /**
+   * Absolute directory for this session's logs. Empty/undefined keeps the
+   * default `<userData>/logs`.
+   */
+  directory?: string
+  /** Prefix each text-log line with a local `[YYYY-MM-DD HH:mm:ss]` stamp. */
+  timestamps?: boolean
 }
 
 export type ConnectionType = 'ssh' | 'serial'

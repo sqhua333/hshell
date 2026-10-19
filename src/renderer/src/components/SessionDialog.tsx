@@ -120,6 +120,8 @@ function SessionDialogInner({
   )
   const [loggingEnabled, setLoggingEnabled] = useState(initial?.logging?.enabled ?? false)
   const [logFormat, setLogFormat] = useState<LogFormat>(initial?.logging?.format ?? 'text')
+  const [logDirectory, setLogDirectory] = useState(initial?.logging?.directory ?? '')
+  const [logTimestamps, setLogTimestamps] = useState(initial?.logging?.timestamps ?? false)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -159,6 +161,11 @@ function SessionDialogInner({
   const browseKey = async (): Promise<void> => {
     const file = await api.fs.pickFile()
     if (file) setKeyPath(file)
+  }
+
+  const browseLogDirectory = async (): Promise<void> => {
+    const directory = await api.fs.pickDirectory()
+    if (directory) setLogDirectory(directory)
   }
 
   const submit = async (connectAfter: boolean): Promise<void> => {
@@ -300,7 +307,12 @@ function SessionDialogInner({
       quickCommands: cleanQuick.length ? cleanQuick : undefined,
       triggers: cleanTriggers.length ? cleanTriggers : undefined,
       highlights: cleanHighlights.length ? cleanHighlights : undefined,
-      logging: { enabled: loggingEnabled, format: logFormat },
+      logging: {
+        enabled: loggingEnabled,
+        format: logFormat,
+        directory: logDirectory.trim() || undefined,
+        timestamps: logFormat === 'text' ? logTimestamps || undefined : undefined
+      },
       color: initial?.color,
       createdAt: initial?.createdAt ?? now,
       updatedAt: now
@@ -1080,10 +1092,46 @@ function SessionDialogInner({
                   </select>
                 </label>
               </div>
+              <label className="field">
+                <span>{tr('日志目录', 'Log directory')}</span>
+                <div className="input-row">
+                  <input
+                    className="input"
+                    value={logDirectory}
+                    onChange={(event) => setLogDirectory(event.target.value)}
+                    placeholder={tr(
+                      '默认：应用数据目录/logs',
+                      'Default: <userData>/logs'
+                    )}
+                    disabled={!loggingEnabled}
+                  />
+                  <button
+                    className="btn"
+                    onClick={() => void browseLogDirectory()}
+                    disabled={!loggingEnabled}
+                  >
+                    {tr('浏览…', 'Browse…')}
+                  </button>
+                </div>
+              </label>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={logTimestamps}
+                  onChange={(event) => setLogTimestamps(event.target.checked)}
+                  disabled={!loggingEnabled || logFormat === 'asciinema'}
+                />
+                <span>
+                  {tr(
+                    '每行添加时间戳（仅纯文本；asciinema 自带时间轴）',
+                    'Prefix each line with a timestamp (text only; asciinema has its own timeline)'
+                  )}
+                </span>
+              </label>
               <div className="form-hint">
                 {tr(
-                  '日志保存在应用数据目录的 logs/ 下，权限 0600，按 10 MB 轮转并保留 5 份。日志可能包含命令与敏感输出，请妥善保管。',
-                  'Logs are stored under logs/ in the application data directory with mode 0600, rotate at 10 MB and keep 5 files. Logs may contain commands and sensitive output; handle them carefully.'
+                  '日志目录留空时写入应用数据目录的 logs/；可选择任意可写文件夹。文件权限 0600，按 10 MB 轮转并保留 5 份。日志可能包含命令与敏感输出，请妥善保管。',
+                  'Leave the directory empty to use logs/ in the application data directory, or pick any writable folder. Files use mode 0600, rotate at 10 MB and keep 5 files. Logs may contain commands and sensitive output; handle them carefully.'
                 )}
               </div>
             </>

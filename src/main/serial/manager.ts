@@ -6,7 +6,7 @@ import type {
   SerialPortInfo,
   Session
 } from '@shared/types'
-import { SessionLogger } from '../storage/session-log'
+import { resolveLogDirectory, SessionLogger } from '../storage/session-log'
 import { ZmodemController, type ZmodemHost } from '../ssh/zmodem'
 
 interface Runtime {
@@ -358,8 +358,10 @@ export class SerialManager {
     const config = rt.session.logging
     if (!config?.enabled || !this.logsDir || rt.log) return
     try {
-      rt.log = new SessionLogger(this.logsDir, `${rt.session.name}-${rt.runtimeId}`, {
+      const directory = resolveLogDirectory(config.directory, this.logsDir)
+      rt.log = new SessionLogger(directory, `${rt.session.name}-${rt.runtimeId}`, {
         format: config.format,
+        timestamps: config.timestamps,
         cols: 80,
         rows: 24,
         term: rt.session.terminal.term
