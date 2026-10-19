@@ -745,8 +745,9 @@ mac:
   用户目录运行。NSIS 安装包在 Linux 上交叉构建需要 wine32（electron-builder
   需运行 32 位安装器生成卸载程序，本机未安装），macOS 产物需要 macOS 主机，二者由
   `.github/workflows/build.yml` 在 CI 中构建。
-- **验证**：`npm run typecheck` 通过；默认 207 个测试通过（183 个单元 + 24 个集成
-  测试；覆盖迁移、导出导入往返、文件夹环、ssh config、ZMODEM 双向协议、断线自动
+- **验证**：`npm run typecheck` 通过；默认 208 个测试通过（183 个单元 + 25 个集成
+  测试；覆盖迁移、导出导入往返、文件夹环、ssh config、ZMODEM 双向协议、串口 ANSI
+  颜色透传、断线自动
   重连、重连预算耗尽后自动断开、主机明确断开时不重连、认证失败不重试、
   保险库加解密与 safeStorage 回退、密钥生成/导入/去重、
   authorized_keys 命令转义、SFTP 校验和往返 / 取消清理 / chmod、路径 sanitizer
