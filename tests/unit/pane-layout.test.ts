@@ -141,6 +141,47 @@ describe('splitAt', () => {
     expect(sessionIds(result)).toEqual(['a', 'b', 'd', 'c'])
   })
 
+  it('places the new pane before the target when dropping on the left/top edge', () => {
+    const a = pane('a')
+    const next = pane('b')
+    const result = asSplit(splitAt(paneNode(a), a.id, next, 'horizontal', 'before'))
+    expect(sessionIds(result)).toEqual(['b', 'a'])
+    expect(result.sizes).toEqual([50, 50])
+  })
+
+  it('inserts before the target in a same-direction row and halves its share', () => {
+    const a = pane('a')
+    const b = pane('b')
+    const root = splitNode('vertical', [paneNode(a), paneNode(b)], [50, 50])
+    const result = asSplit(splitAt(root, b.id, pane('c'), 'vertical', 'before'))
+    expect(result.sizes).toEqual([50, 25, 25])
+    expect(sessionIds(result)).toEqual(['a', 'c', 'b'])
+  })
+
+  it('nests the new pane before a different-direction target', () => {
+    const a = pane('a')
+    const b = pane('b')
+    const root = splitNode('vertical', [paneNode(a), paneNode(b)], [40, 60])
+    const result = asSplit(splitAt(root, b.id, pane('c'), 'horizontal', 'before'))
+    expect(result.sizes).toEqual([40, 60])
+    const nested = asSplit(result.children[1])
+    expect(nested.sizes).toEqual([50, 50])
+    expect(sessionIds(nested)).toEqual(['c', 'b'])
+  })
+
+  it('propagates the side through nested splits', () => {
+    const a = pane('a')
+    const b = pane('b')
+    const c = pane('c')
+    const root = splitNode(
+      'vertical',
+      [paneNode(a), splitNode('horizontal', [paneNode(b), paneNode(c)], [50, 50])],
+      [40, 60]
+    )
+    const result = splitAt(root, c.id, pane('d'), 'horizontal', 'before')
+    expect(sessionIds(result as LayoutNode)).toEqual(['a', 'b', 'd', 'c'])
+  })
+
   it('returns null for an unknown pane', () => {
     const root = splitNode('horizontal', [paneNode(pane('a')), paneNode(pane('b'))])
     expect(splitAt(root, 'missing', pane('c'), 'vertical')).toBeNull()

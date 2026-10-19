@@ -9,6 +9,7 @@ import type { Folder, Session } from '@shared/types'
 import { sessionTarget } from '@shared/session'
 import { api } from '../api'
 import { tr } from '../lib/i18n'
+import { setSessionDragData } from '../lib/session-drag'
 import { useApp } from '../store'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 import { Icon } from './Icon'
@@ -319,8 +320,16 @@ export function SessionSidebar(): ReactElement {
         activeSessionId === session.id ? 'active' : ''
       }`}
       style={{ paddingLeft: 28 + depth * 14 }}
-      title={sessionTarget(session)}
+      title={tr(
+        `${sessionTarget(session)}（拖到终端分屏）`,
+        `${sessionTarget(session)} (drag onto a terminal to split)`
+      )}
       tabIndex={0}
+      // Dragging a session onto a pane opens it there, which is how an SSH
+      // session and a serial session end up side by side.
+      draggable
+      data-session-id={session.id}
+      onDragStart={(event) => setSessionDragData(event.dataTransfer, session.id)}
       onClick={() => setSelectedId(session.id)}
       onDoubleClick={() => openSession(session)}
       onContextMenu={(event) => openMenuForSession(event, session)}

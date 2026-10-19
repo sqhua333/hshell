@@ -24,6 +24,9 @@ export interface SplitNode {
 
 export type LayoutNode = PaneNode | SplitNode
 
+/** Where the new pane goes relative to the pane it splits. */
+export type SplitSide = 'before' | 'after'
+
 export interface PaneRect {
   left: number
   top: number
@@ -110,11 +113,16 @@ export function splitAt(
   root: LayoutNode,
   targetPaneId: string,
   newPane: PaneState,
-  direction: SplitDirection
+  direction: SplitDirection,
+  side: SplitSide = 'after'
 ): LayoutNode | null {
   if (root.type === 'pane') {
     if (root.pane.id !== targetPaneId) return null
-    return splitNode(direction, [root, paneNode(newPane)], [50, 50])
+    return splitNode(
+      direction,
+      side === 'before' ? [paneNode(newPane), root] : [root, paneNode(newPane)],
+      [50, 50]
+    )
   }
 
   const index = root.children.findIndex((child) => containsPane(child, targetPaneId))
@@ -131,22 +139,26 @@ export function splitAt(
         share / 2,
         ...sizes.slice(index + 1)
       ]
+      const insertAt = side === 'before' ? index : index + 1
       const children = [
-        ...root.children.slice(0, index),
-        child,
+        ...root.children.slice(0, insertAt),
         paneNode(newPane),
-        ...root.children.slice(index + 1)
+        ...root.children.slice(insertAt)
       ]
       return { ...root, sizes: nextSizes, children }
     }
-    const nested = splitNode(direction, [child, paneNode(newPane)], [50, 50])
+    const nested = splitNode(
+      direction,
+      side === 'before' ? [paneNode(newPane), child] : [child, paneNode(newPane)],
+      [50, 50]
+    )
     return {
       ...root,
       children: root.children.map((item, itemIndex) => (itemIndex === index ? nested : item))
     }
   }
 
-  const replaced = splitAt(child, targetPaneId, newPane, direction)
+  const replaced = splitAt(child, targetPaneId, newPane, direction, side)
   if (!replaced) return null
   return {
     ...root,

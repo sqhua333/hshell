@@ -22,7 +22,8 @@ import {
   setSplitSizes,
   splitAt,
   type LayoutNode,
-  type PaneState
+  type PaneState,
+  type SplitSide
 } from './lib/pane-layout'
 import { generateReplayScript, recorder, replayFileName } from './lib/recorder'
 
@@ -124,6 +125,13 @@ interface AppState {
   nextTab(delta: number): void
   selectTabIndex(index: number): void
   splitActive(direction: SplitDirection): void
+  splitPaneWithSession(
+    tabId: string,
+    targetPaneId: string,
+    sessionId: string,
+    direction: SplitDirection,
+    side?: SplitSide
+  ): void
   setTabSizes(tabId: string, splitId: string, sizes: number[]): void
   closePane(tabId: string, paneId: string): void
   setActiveRuntime(runtimeId: string): void
@@ -416,6 +424,31 @@ export const useApp = create<AppState>((set, get) => ({
           : item
       ),
       activeRuntimeId: pane.runtimeId,
+      statuses: { ...state.statuses, [pane.runtimeId]: { status: 'connecting' } }
+    })
+    scheduleLayoutSave(get)
+  },
+
+  splitPaneWithSession(tabId, targetPaneId, sessionId, direction, side = 'after') {
+    const state = get()
+    const tab = state.tabs.find((item) => item.id === tabId)
+    const session = state.sessions.find((item) => item.id === sessionId)
+    if (!tab || !session) return
+    const pane: PaneState = {
+      id: uid('pane'),
+      runtimeId: uid('rt'),
+      sessionId: session.id,
+      autoConnect: true
+    }
+    const layout = splitAt(tab.layout, targetPaneId, pane, direction, side)
+    if (!layout) return
+    set({
+      tabs: state.tabs.map((item) =>
+        item.id === tab.id ? { ...item, layout, panes: collectPanes(layout) } : item
+      ),
+      activeTabId: tab.id,
+      activeRuntimeId: pane.runtimeId,
+      lastSessionId: session.id,
       statuses: { ...state.statuses, [pane.runtimeId]: { status: 'connecting' } }
     })
     scheduleLayoutSave(get)
