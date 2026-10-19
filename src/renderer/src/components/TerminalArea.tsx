@@ -18,7 +18,12 @@ import {
   type SplitGeometry,
   type SplitSide
 } from '../lib/pane-layout'
-import { isSessionDrag, readSessionDragId } from '../lib/session-drag'
+import {
+  isSessionDrag,
+  isTabDrag,
+  readSessionDragId,
+  readTabDragId
+} from '../lib/session-drag'
 import { getTerminal } from '../lib/terminal-registry'
 import { useApp } from '../store'
 import { Icon } from './Icon'
@@ -211,6 +216,7 @@ export function TerminalArea(): ReactElement {
   const setTabSizes = useApp((state) => state.setTabSizes)
   const closePane = useApp((state) => state.closePane)
   const splitPaneWithSession = useApp((state) => state.splitPaneWithSession)
+  const splitPaneWithTab = useApp((state) => state.splitPaneWithTab)
 
   const searchInputRef = useRef<HTMLInputElement>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
@@ -281,10 +287,10 @@ export function TerminalArea(): ReactElement {
     event: ReactDragEvent<HTMLDivElement>,
     tabId: string
   ): void => {
-    if (!isSessionDrag(event.dataTransfer)) return
+    if (!isSessionDrag(event.dataTransfer) && !isTabDrag(event.dataTransfer)) return
     event.preventDefault()
     event.stopPropagation()
-    event.dataTransfer.dropEffect = 'copy'
+    event.dataTransfer.dropEffect = isTabDrag(event.dataTransfer) ? 'move' : 'copy'
     const geometry = geometryByTab.get(tabId)
     if (!geometry) return
     const target = resolveDropTarget(event, geometry)
@@ -304,22 +310,27 @@ export function TerminalArea(): ReactElement {
   }
 
   const handleDragLeave = (event: ReactDragEvent<HTMLDivElement>): void => {
-    if (!isSessionDrag(event.dataTransfer)) return
+    if (!isSessionDrag(event.dataTransfer) && !isTabDrag(event.dataTransfer)) return
     const related = event.relatedTarget as Node | null
     if (related && event.currentTarget.contains(related)) return
     setDropTarget(null)
   }
 
   const handleDrop = (event: ReactDragEvent<HTMLDivElement>, tabId: string): void => {
-    if (!isSessionDrag(event.dataTransfer)) return
+    if (!isSessionDrag(event.dataTransfer) && !isTabDrag(event.dataTransfer)) return
     event.preventDefault()
     event.stopPropagation()
     const geometry = geometryByTab.get(tabId)
     const target = geometry ? resolveDropTarget(event, geometry) : null
+    const draggedTabId = readTabDragId(event.dataTransfer)
     const sessionId = readSessionDragId(event.dataTransfer)
     setDropTarget(null)
-    if (!target || !sessionId) return
-    splitPaneWithSession(tabId, target.paneId, sessionId, target.direction, target.side)
+    if (!target) return
+    if (draggedTabId) {
+      splitPaneWithTab(tabId, target.paneId, draggedTabId, target.direction, target.side)
+    } else if (sessionId) {
+      splitPaneWithSession(tabId, target.paneId, sessionId, target.direction, target.side)
+    }
   }
 
   // A drag cancelled outside the canvas (Esc, dropped elsewhere) never fires

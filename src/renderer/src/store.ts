@@ -21,6 +21,8 @@ import {
   removePane,
   setSplitSizes,
   splitAt,
+  splitAtNode,
+  splitNode,
   type LayoutNode,
   type PaneState,
   type SplitSide
@@ -134,6 +136,13 @@ interface AppState {
     direction: SplitDirection,
     side?: SplitSide
   ): void
+  splitPaneWithTab(
+    targetTabId: string,
+    targetPaneId: string,
+    sourceTabId: string,
+    direction: SplitDirection,
+    side?: SplitSide
+  ): void
   setTabSizes(tabId: string, splitId: string, sizes: number[]): void
   closePane(tabId: string, paneId: string): void
   setActiveRuntime(runtimeId: string): void
@@ -237,6 +246,27 @@ function sessionForRuntime(runtimeId: string, state: AppState): Session | null {
 const HOME_SESSION_ID = 's-local'
 
 let layoutSaveTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * Clone a tab layout for insertion into another tab. Every pane gets a fresh
+ * id and runtime so it opens its own connection, and split ids are regenerated
+ * (splitNode) so they stay unique inside the target layout.
+ */
+function cloneLayoutForSplit(node: LayoutNode): LayoutNode {
+  if (node.type === 'pane') {
+    return paneNode({
+      id: uid('pane'),
+      runtimeId: uid('rt'),
+      sessionId: node.pane.sessionId,
+      autoConnect: true
+    })
+  }
+  return splitNode(
+    node.direction,
+    node.children.map(cloneLayoutForSplit),
+    node.sizes ? [...node.sizes] : undefined
+  )
+}
 
 function scheduleLayoutSave(get: () => AppState): void {
   if (typeof window === 'undefined') return
@@ -454,6 +484,53 @@ export const useApp = create<AppState>((set, get) => ({
       activeRuntimeId: pane.runtimeId,
       lastSessionId: session.id,
       statuses: { ...state.statuses, [pane.runtimeId]: { status: 'connecting' } }
+    })
+    scheduleLayoutSave(get)
+  },
+
+  splitPaneWithTab(targetTabId, targetPaneId, sourceTabId, direction, side = 'after') {
+    const state = get()
+    const target = state.tabs.find((item) => item.id === targetTabId)
+    const source = state.tabs.find((item) => item.id === sourceTabId)
+    if (!target || !source) return
+
+    // Dropping the active tab on its own terminal is a shortcut for the split
+    // button: keep the tab and add one more connection.
+    if (sourceTabId === targetTabId) {
+      const activePane =
+        source.panes.find((pane) => pane.runtimeId === state.activeRuntimeId) ?? source.panes[0]
+      if (activePane) {
+        get().splitPaneWithSession(targetTabId, targetPaneId, activePane.sessionId, direction, side)
+      }
+      return
+    }
+
+    // Clone the source tab's panes with fresh runtimes. The source tab is
+    // closed below, so its terminals are disposed anyway; reusing its runtime
+    // ids could race the old disconnect against the new connect.
+    const movedLayout = cloneLayoutForSplit(source.layout)
+    const movedPanes = collectPanes(movedLayout)
+    const layout = splitAtNode(target.layout, targetPaneId, movedLayout, direction, side)
+    if (!layout) return
+
+    if (source.panes.some((pane) => pane.runtimeId === state.recordingRuntimeId)) {
+      get().cancelRecording(tr('会话已关闭，录制已停止', 'Session closed; recording stopped'))
+    }
+    source.panes.forEach((pane) => void api.ssh.disconnect(pane.runtimeId))
+
+    const statuses = { ...state.statuses }
+    for (const pane of movedPanes) statuses[pane.runtimeId] = { status: 'connecting' }
+
+    set({
+      tabs: state.tabs
+        .filter((item) => item.id !== source.id)
+        .map((item) =>
+          item.id === target.id ? { ...item, layout, panes: collectPanes(layout) } : item
+        ),
+      activeTabId: target.id,
+      activeRuntimeId: movedPanes[0]?.runtimeId ?? state.activeRuntimeId,
+      lastSessionId: movedPanes[0]?.sessionId ?? state.lastSessionId,
+      statuses
     })
     scheduleLayoutSave(get)
   },

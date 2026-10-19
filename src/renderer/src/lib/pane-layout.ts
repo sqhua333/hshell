@@ -116,11 +116,25 @@ export function splitAt(
   direction: SplitDirection,
   side: SplitSide = 'after'
 ): LayoutNode | null {
+  return splitAtNode(root, targetPaneId, paneNode(newPane), direction, side)
+}
+
+/**
+ * Same as `splitAt`, but inserts an entire layout subtree (for example the
+ * panes of a tab dropped onto the terminal) instead of a single pane.
+ */
+export function splitAtNode(
+  root: LayoutNode,
+  targetPaneId: string,
+  newNode: LayoutNode,
+  direction: SplitDirection,
+  side: SplitSide = 'after'
+): LayoutNode | null {
   if (root.type === 'pane') {
     if (root.pane.id !== targetPaneId) return null
     return splitNode(
       direction,
-      side === 'before' ? [paneNode(newPane), root] : [root, paneNode(newPane)],
+      side === 'before' ? [newNode, root] : [root, newNode],
       [50, 50]
     )
   }
@@ -142,14 +156,14 @@ export function splitAt(
       const insertAt = side === 'before' ? index : index + 1
       const children = [
         ...root.children.slice(0, insertAt),
-        paneNode(newPane),
+        newNode,
         ...root.children.slice(insertAt)
       ]
       return { ...root, sizes: nextSizes, children }
     }
     const nested = splitNode(
       direction,
-      side === 'before' ? [paneNode(newPane), child] : [child, paneNode(newPane)],
+      side === 'before' ? [newNode, child] : [child, newNode],
       [50, 50]
     )
     return {
@@ -158,7 +172,7 @@ export function splitAt(
     }
   }
 
-  const replaced = splitAt(child, targetPaneId, newPane, direction, side)
+  const replaced = splitAtNode(child, targetPaneId, newNode, direction, side)
   if (!replaced) return null
   return {
     ...root,

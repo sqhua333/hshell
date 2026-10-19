@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react'
 import { sessionTarget } from '@shared/session'
 import { tr } from '../lib/i18n'
+import { setTabDragData } from '../lib/session-drag'
 import { useApp } from '../store'
 import { Icon } from './Icon'
 
@@ -33,7 +34,15 @@ export function TabBar(): ReactElement | null {
             <div
               key={tab.id}
               className={`tab ${activeTabId === tab.id ? 'active' : ''}`}
-              title={sessionTarget(tab.session)}
+              // Dragging a tab onto the terminal merges it into that tab as a
+              // split, so two already-open sessions can be shown side by side.
+              draggable
+              data-tab-id={tab.id}
+              title={tr(
+                `${sessionTarget(tab.session)}（拖到终端分屏）`,
+                `${sessionTarget(tab.session)} (drag onto a terminal to split)`
+              )}
+              onDragStart={(event) => setTabDragData(event.dataTransfer, tab.id)}
               onClick={() => activateTab(tab.id)}
               onAuxClick={(event) => {
                 if (event.button === 1) closeTab(tab.id)
@@ -46,6 +55,7 @@ export function TabBar(): ReactElement | null {
               <span className="tab-title">{tab.session.name}</span>
               <button
                 className="tab-close"
+                draggable={false}
                 title={tr('关闭标签页 (Ctrl+W)', 'Close tab (Ctrl+W)')}
                 onClick={(event) => {
                   event.stopPropagation()

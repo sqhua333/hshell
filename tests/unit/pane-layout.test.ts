@@ -8,6 +8,7 @@ import {
   removePane,
   setSplitSizes,
   splitAt,
+  splitAtNode,
   splitNode,
   type LayoutNode,
   type PaneState,
@@ -199,6 +200,30 @@ describe('splitAt', () => {
     const result = asSplit(splitAt(root, b.id, pane('d'), 'horizontal'))
     expect(result.sizes).toEqual([20, 15, 15, 50])
     expect(sessionIds(result)).toEqual(['a', 'b', 'd', 'c'])
+  })
+})
+
+describe('splitAtNode', () => {
+  it('inserts an entire tab layout as a nested split', () => {
+    const a = pane('a')
+    const b = pane('b')
+    const root = splitNode('horizontal', [paneNode(a), paneNode(b)], [50, 50])
+    const moved = splitNode('vertical', [paneNode(pane('c')), paneNode(pane('d'))])
+    const result = asSplit(splitAtNode(root, a.id, moved, 'horizontal')!)
+    expect(result.direction).toBe('horizontal')
+    expect(effectiveSizes(result)).toEqual([25, 25, 50])
+    expect(sessionIds(result)).toEqual(['a', 'c', 'd', 'b'])
+    expect(asSplit(result.children[1]).direction).toBe('vertical')
+  })
+
+  it('places the moved layout before the target and keeps the other share', () => {
+    const a = pane('a')
+    const b = pane('b')
+    const root = splitNode('horizontal', [paneNode(a), paneNode(b)], [50, 50])
+    const moved = splitNode('vertical', [paneNode(pane('c')), paneNode(pane('d'))])
+    const result = asSplit(splitAtNode(root, b.id, moved, 'horizontal', 'before')!)
+    expect(effectiveSizes(result)).toEqual([50, 25, 25])
+    expect(sessionIds(result)).toEqual(['a', 'c', 'd', 'b'])
   })
 })
 

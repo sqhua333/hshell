@@ -8,7 +8,10 @@
  *     split with the new pane on the right.
  *  3. Drag a third session onto the bottom half of the right pane: the outer
  *     split keeps its sizes and the right pane nests a 50/50 vertical split.
- *  4. All panes connect, both dividers exist, and the nested tree is written
+ *  4. Open a fourth session in its own tab and drag that tab onto the left
+ *     half of a pane: the tab merges into the split and disappears from the
+ *     tab bar.
+ *  5. All panes connect, both dividers exist, and the nested tree is written
  *     to layouts.json.
  *
  * Requires a prior `npm run build` (it launches out/main/index.js).
@@ -53,7 +56,12 @@ writeFileSync(
   join(profile, 'sessions.json'),
   JSON.stringify({
     schemaVersion: 2,
-    data: [session('alpha', '甲主机'), session('beta', '乙主机'), session('gamma', '丙主机')]
+    data: [
+      session('alpha', '甲主机'),
+      session('beta', '乙主机'),
+      session('gamma', '丙主机'),
+      session('delta', '丁主机')
+    ]
   })
 )
 writeFileSync(join(profile, 'folders.json'), JSON.stringify({ schemaVersion: 2, data: [] }))
@@ -282,17 +290,73 @@ try {
         () => document.querySelector('.statusbar')?.textContent?.includes('已连接'),
         'third connection'
       )
+      const afterVertical = paneInfo()
+      const dividers = [...document.querySelectorAll('.pane-handle')].map((handle) => ({
+        className: handle.className,
+        orientation: handle.getAttribute('aria-orientation'),
+        left: handle.style.left,
+        top: handle.style.top
+      }))
+
+      // 4. Open a fourth session in its own tab, then drag that tab onto the
+      //    left half of the first pane: both tabs merge into one split.
+      const deltaRow = await waitFor(
+        () => document.querySelector('.session-row[data-session-id="delta"]'),
+        'delta session row'
+      )
+      deltaRow.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+      await waitFor(() => document.querySelectorAll('.tab').length === 2, 'delta tab')
+      await waitFor(
+        () => document.querySelector('.statusbar')?.textContent?.includes('已连接'),
+        'delta connection'
+      )
+      const deltaTab = [...document.querySelectorAll('.tab')].find((tab) => tab.textContent.includes('丁主机'))
+      if (!deltaTab?.dataset.tabId) throw new Error('delta tab has no drag id')
+
+      // Switch back to the first tab so its canvas is laid out and measurable.
+      const firstTab = [...document.querySelectorAll('.tab')].find((tab) => tab.textContent.includes('甲主机'))
+      firstTab.click()
+      await sleep(150)
+
+      const alphaCell = panes().find((cell) => cell.getAttribute('data-session-id') === 'alpha')
+      const alphaRect = alphaCell.getBoundingClientRect()
+      const tabDragData = new DataTransfer()
+      deltaTab.dispatchEvent(
+        new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: tabDragData })
+      )
+      const tabDragTypes = [...tabDragData.types]
+      const tabDragInit = {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: tabDragData,
+        clientX: alphaRect.left + alphaRect.width * 0.1,
+        clientY: alphaRect.top + alphaRect.height * 0.5
+      }
+      canvas.dispatchEvent(new DragEvent('dragover', tabDragInit))
+      const tabPreview = await waitFor(() => {
+        const zone = document.querySelector('.pane-drop-zone')
+        return zone ? { left: zone.style.left, width: zone.style.width } : null
+      }, 'tab drop preview')
+      canvas.dispatchEvent(new DragEvent('drop', tabDragInit))
+      await acceptHostKey()
+
+      await waitFor(() => document.querySelectorAll('.tab').length === 1, 'source tab merged')
+      await waitFor(() => panes().length === 4, 'four panes')
+      const afterTabMerge = paneInfo()
+      await waitFor(
+        () => document.querySelector('.statusbar')?.textContent?.includes('已连接'),
+        'merged connection'
+      )
 
       return {
         preview,
         afterHorizontal,
-        afterVertical: paneInfo(),
-        dividers: [...document.querySelectorAll('.pane-handle')].map((handle) => ({
-          className: handle.className,
-          orientation: handle.getAttribute('aria-orientation'),
-          left: handle.style.left,
-          top: handle.style.top
-        })),
+        afterVertical,
+        dividers,
+        tabDragTypes,
+        tabPreview,
+        tabsAfterMerge: document.querySelectorAll('.tab').length,
+        afterTabMerge,
         status: document.querySelector('.statusbar')?.textContent || ''
       }
     `)
@@ -350,7 +414,47 @@ try {
     fail('missing vertical divider', result)
   }
 
-  // 4. The nested tree must be persisted (layout saves are debounced ~200ms).
+  // Dragging an open tab: dragstart must expose the tab MIME, the drop preview
+  // covers the left quarter of alpha, and the source tab is merged away.
+  if (!result.tabDragTypes.includes('application/x-hshell-tab')) {
+    fail('tab dragstart did not expose the tab MIME type', result)
+  }
+  if (result.tabsAfterMerge !== 1) fail('source tab was not merged into the target', result)
+  if (result.tabPreview.left !== '0%' || result.tabPreview.width !== '25%') {
+    fail('tab drop preview did not cover the left quarter of the pane', result)
+  }
+  const merged = Object.fromEntries(result.afterTabMerge.map((pane) => [pane.sessionId, pane]))
+  if (!merged.delta || !merged.alpha || !merged.beta || !merged.gamma) {
+    fail('missing pane after merging the tab', result)
+  }
+  if (
+    merged.delta.left !== '0%' ||
+    merged.delta.top !== '0%' ||
+    merged.delta.width !== '25%' ||
+    merged.delta.height !== '100%'
+  ) {
+    fail('merged tab pane is not the leftmost quarter', result)
+  }
+  if (
+    merged.alpha.left !== '25%' ||
+    merged.alpha.top !== '0%' ||
+    merged.alpha.width !== '25%' ||
+    merged.alpha.height !== '100%'
+  ) {
+    fail('target pane did not shrink to make room for the merged tab', result)
+  }
+  if (
+    merged.beta.left !== '50%' ||
+    merged.beta.width !== '50%' ||
+    merged.beta.height !== '50%'
+  ) {
+    fail('right column changed size after merging the tab', result)
+  }
+  if (merged.gamma.left !== '50%' || merged.gamma.top !== '50%' || merged.gamma.height !== '50%') {
+    fail('nested bottom pane changed after merging the tab', result)
+  }
+
+  // 5. The merged nested tree must be persisted (layout saves are debounced ~200ms).
   const layoutFile = join(profile, 'layouts.json')
   const deadline = Date.now() + 5000
   let stored = null
@@ -373,12 +477,24 @@ try {
   if (
     rootLayout.type !== 'split' ||
     rootLayout.direction !== 'horizontal' ||
-    rootLayout.children?.length !== 2 ||
-    rootLayout.children[0]?.sessionId !== 'alpha'
+    rootLayout.children?.length !== 3 ||
+    rootLayout.children[0]?.sessionId !== 'delta' ||
+    rootLayout.children[1]?.sessionId !== 'alpha'
   ) {
-    fail('persisted root is not the expected horizontal split', { stored, result })
+    fail('persisted root does not include the merged tab and the original pane', {
+      stored,
+      result
+    })
   }
-  const nested = rootLayout.children[1]
+  if (
+    !Array.isArray(rootLayout.sizes) ||
+    rootLayout.sizes[0] !== 25 ||
+    rootLayout.sizes[1] !== 25 ||
+    rootLayout.sizes[2] !== 50
+  ) {
+    fail('persisted sizes do not match the merged split', { stored, result })
+  }
+  const nested = rootLayout.children[2]
   if (
     nested?.type !== 'split' ||
     nested.direction !== 'vertical' ||
