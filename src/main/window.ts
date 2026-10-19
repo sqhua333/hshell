@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, nativeImage, shell } from 'electron'
-import { appendFileSync, mkdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { launchFailureMessage } from './diagnostic-messages'
+import { logDiagnostic } from './diagnostics'
 
 /**
  * Record renderer failures where the user can find them even when the window
@@ -8,14 +9,11 @@ import { join } from 'node:path'
  * running copy) is the usual cause of a white window in packaged builds.
  */
 function logRendererFailure(message: string): void {
-  try {
-    const dir = app.getPath('userData')
-    mkdirSync(dir, { recursive: true })
-    appendFileSync(join(dir, 'renderer-errors.log'), `[${new Date().toISOString()}] ${message}\n`)
-  } catch {
-    /* diagnostics must never break startup */
-  }
+  logDiagnostic(message, 'renderer-errors.log')
 }
+
+// A failed renderer launch can fire more than once; show the guidance only once.
+let launchFailureReported = false
 
 // Packaged builds ship the PNG via electron-builder `extraResources`; in dev it
 // is read straight from the repository's build/ directory.
@@ -79,6 +77,22 @@ export function createWindow(): BrowserWindow {
 
   win.webContents.on('render-process-gone', (_event, details) => {
     logRendererFailure(`render-process-gone ${details.reason} exitCode=${details.exitCode}`)
+    if (details.reason !== 'launch-failed' || process.platform !== 'win32' || launchFailureReported) {
+      return
+    }
+    // Windows refuses to start the sandboxed renderer when the install
+    // directory lacks the AppContainer ACEs; without this the window simply
+    // disappears during startup.
+    launchFailureReported = true
+    dialog.showErrorBox(
+      'HShell 无法启动渲染进程',
+      launchFailureMessage({
+        appDir: dirname(process.execPath),
+        logDir: app.getPath('userData'),
+        reason: details.reason,
+        exitCode: details.exitCode
+      })
+    )
   })
 
   win.webContents.on('preload-error', (_event, preloadPath, error) => {
@@ -95,11 +109,14 @@ export function createWindow(): BrowserWindow {
     })
   }
 
-  if (process.env.ELECTRON_RENDERER_URL) {
-    void win.loadURL(process.env.ELECTRON_RENDERER_URL)
-  } else {
-    void win.loadFile(join(__dirname, '../renderer/index.html'))
-  }
+  const loading = process.env.ELECTRON_RENDERER_URL
+    ? win.loadURL(process.env.ELECTRON_RENDERER_URL)
+    : win.loadFile(join(__dirname, '../renderer/index.html'))
+  loading.catch((error: unknown) => {
+    logRendererFailure(
+      `load failed ${error instanceof Error ? error.message : String(error)}`
+    )
+  })
 
   return win
 }

@@ -743,12 +743,17 @@ mac:
   静默退出。渲染页面加载失败（例如 `app.asar` 解压不完整、被占用或被杀软拦截）时，
   主进程会把 `did-fail-load`、`render-process-gone`、preload 与渲染进程错误写入
   `<userData>/renderer-errors.log` 并弹窗提示；`index.html` 内置静态加载提示，避免
-  出现没有任何信息的白屏。可执行文件清单为 `asInvoker`，程序本身不要求管理员权限；若解压目录受
+  出现没有任何信息的白屏。当 `render-process-gone` 的原因为 `launch-failed` 时
+  （Windows 便携版常见于解压目录缺少 AppContainer SID 的读取/执行 ACE，Chromium
+  沙箱因此无法创建渲染进程），主进程会弹窗说明原因，并给出
+  `icacls "<目录>" /grant "*S-1-15-2-1:(OI)(CI)(RX)" "*S-1-15-2-2:(OI)(CI)(RX)" /T`
+  修复命令；启动阶段、单实例锁结果、`child-process-gone`、未捕获异常与退出原因写入
+  `<userData>/startup.log`，渲染层错误仍写入 `renderer-errors.log`。可执行文件清单为 `asInvoker`，程序本身不要求管理员权限；若解压目录受
   策略限制（如 `Program Files`、AppLocker/SmartScreen 拦截未签名程序），需换到普通
   用户目录运行。NSIS 安装包在 Linux 上交叉构建需要 wine32（electron-builder
   需运行 32 位安装器生成卸载程序，本机未安装），macOS 产物需要 macOS 主机，二者由
   `.github/workflows/build.yml` 在 CI 中构建。
-- **验证**：`npm run typecheck` 通过；默认 208 个测试通过（183 个单元 + 25 个集成
+- **验证**：`npm run typecheck` 通过；默认 211 个测试通过（186 个单元 + 25 个集成
   测试；覆盖迁移、导出导入往返、文件夹环、ssh config、ZMODEM 双向协议、串口 ANSI
   颜色透传、断线自动
   重连、重连预算耗尽后自动断开、主机明确断开时不重连、认证失败不重试、
@@ -761,7 +766,8 @@ mac:
   嵌套分屏的份额保持/嵌套方向/删除折叠/几何计算、
   布局树构建恢复与旧平面格式兼容/损坏回退、i18n 切换、串口参数
   规范化与 socat 虚拟串口双向收发 / 日志 / ZMODEM / 错误提示、输出规则引擎与
-  跨块匹配/冷却、录制器与回放脚本语法、配色方案解析、自动化 schema）。另有 5 个默认跳过
+  跨块匹配/冷却、录制器与回放脚本语法、配色方案解析、自动化 schema、
+  启动诊断文案与 ACL 修复命令）。另有 5 个默认跳过
   的浸泡测试，用 `HSHELL_SOAK=1` /
   `HSHELL_SOAK_FULL=1` 开启（20 会话 ×3 轮、16MB 背压、并发连接风暴、30 次连接
   循环、100MB SFTP 往返），均已在本机通过。`npm run build` 通过；打包后的

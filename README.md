@@ -315,6 +315,14 @@ SmartScreen 拦截未签名程序，请解压到桌面/文档等普通用户目�
 单实例：已有实例在运行（尤其是以管理员身份启动的实例）时，新启动会弹窗说明并退出。
 窗口在创建后立即显示，不等待渲染完成。
 
+如果窗口出现后立即消失，或弹窗提示“无法启动渲染进程”（`launch-failed`），说明
+Windows 的 Chromium 沙箱无法读取解压目录：该目录缺少 AppContainer SID 的读取/执行
+权限。用管理员命令提示符执行
+`icacls "<目录>" /grant "*S-1-15-2-1:(OI)(CI)(RX)" "*S-1-15-2-2:(OI)(CI)(RX)" /T`
+后重新启动即可（程序本身仍以普通权限运行）。每次启动的锁获取、子进程退出与退出
+原因记录在 `%APPDATA%\hshell\startup.log`，渲染层错误记录在
+`%APPDATA%\hshell\renderer-errors.log`。
+
 发布前请把 `package.json` 中的 `homepage` 与维护者邮箱占位符（`example.com`）
 替换为真实信息。
 
