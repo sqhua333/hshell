@@ -443,7 +443,7 @@ function SessionDialogInner({
                     }}
                   >
                     <option value="ssh">SSH</option>
-                    <option value="serial">{tr('串口', 'Serial')}</option>
+                    <option value="serial">UART</option>
                   </select>
                 </label>
 

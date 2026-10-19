@@ -170,6 +170,30 @@ describe.skipIf(!HAS_SOCAT)('serial connections', () => {
     await closePort(reopened)
   }, 20_000)
 
+  it('passes ANSI color sequences through to the renderer unchanged', async () => {
+    const pair = await startSocatPair()
+    const peer = await openPort(pair.b)
+    cleanup.push(() => closePort(peer))
+
+    const { manager, events, statuses } = createManager()
+    await manager.connect({
+      runtimeId: RUNTIME,
+      session: { ...SESSION, serial: { ...SERIAL, path: pair.a } },
+      cols: 80,
+      rows: 24
+    })
+    await waitFor(() => statuses.includes('connected'))
+
+    const colored = '\u001b[31mred\u001b[0m \u001b[32mgreen\u001b[0m\r\n'
+    peer.write(colored)
+    await waitFor(() => dataReceived(events).includes('red'))
+    // The serial path must not strip or rewrite SGR sequences; xterm applies
+    // them with the session's palette.
+    expect(dataReceived(events)).toContain(colored)
+
+    manager.disconnect(RUNTIME)
+  }, 20_000)
+
   it('writes terminal output to a session log', async () => {
     const pair = await startSocatPair()
     const peer = await openPort(pair.b)
