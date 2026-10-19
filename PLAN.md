@@ -721,9 +721,11 @@ mac:
   通过 CDP 验证渲染进程、preload 桥与工具栏。ASAR 内排除 `cpu-features` 与 ssh2
   的可选 `.node`、测试目录与 devDependencies；串口所需的
   `@serialport/bindings-cpp` prebuilds 放在 `app.asar.unpacked`，打包产物已实测可
-  `serial.list()` 并枚举真实设备。Windows
-  `--dir` 产物已生成并检查；NSIS 安装包在 Linux 上交叉构建需要 wine（本机未安装），
-  macOS 产物需要 macOS 主机，二者由 `.github/workflows/build.yml` 在 CI 中构建。
+  `serial.list()` 并枚举真实设备。Windows `--dir`、免安装单文件
+  （`dist:win:portable`，约 94MB）与 zip（`dist:win:zip`，约 146MB）产物已生成并检查，
+  ASAR 内包含当前源码；NSIS 安装包在 Linux 上交叉构建需要 wine32（electron-builder
+  需运行 32 位安装器生成卸载程序，本机未安装），macOS 产物需要 macOS 主机，二者由
+  `.github/workflows/build.yml` 在 CI 中构建。
 - **验证**：`npm run typecheck` 通过；默认 194 个测试通过（171 个单元 + 23 个集成
   测试；覆盖迁移、导出导入往返、文件夹环、ssh config、ZMODEM 双向协议、断线自动
   重连、重连预算耗尽后自动断开、主机明确断开时不重连、认证失败不重试、
@@ -757,7 +759,8 @@ mac:
   变为「已断开」而非无限重连，终端缓冲同时打印 `[HShell] 连接已断开…` 与
   `Ctrl+Shift+R` 重连提示；直接结束 mock sshd（明确关闭）时则立即断开、不重试。
 
-尚未完成：Windows NSIS 与 macOS dmg 的实机验证（需 wine / macOS 或 CI 运行）；
+尚未完成：Windows NSIS 与 macOS dmg 的实机验证（NSIS 需 wine32，macOS 需 macOS
+主机或 CI 运行）；
 24 小时保活未实跑；串口仅在 `socat` 虚拟串口与本机 `/dev/ttyS*` 枚举上验证，尚未
 在真实 USB 转串口适配器与硬件流控下实跑。
 
@@ -878,8 +881,9 @@ mac:
   与 `electronLanguages` 裁剪；fuse 翻转发生在签名前。ASAR 排除 `cpu-features`、
   全部 `.node`、ssh2 `util/pagent.exe`（pagent 触发整包 unpack）和测试/文档目录，
   产物 704 个条目内无原生模块。`scripts/smoke-packaged.mjs` 通过 CDP 检查启动；
-  已验证 AppImage 解包、deb 解包与 `--dir` 产物。Windows `--dir` 可交叉生成，
-  NSIS 需要 wine；`.github/workflows/build.yml` 提供 Ubuntu/Windows/macOS 三平台构建。
+  已验证 AppImage 解包、deb 解包与 `--dir` 产物。Windows `--dir`、portable 与 zip
+  可交叉生成，NSIS 需要 wine32；`.github/workflows/build.yml` 提供
+  Ubuntu/Windows/macOS 三平台构建。
   已知占位元数据：`homepage`、维护者邮箱使用 `example.com`，发布前应替换。
 - P8 完成：`main/storage/session-log.ts` 提供文本与 asciinema v2 两种格式，使用
   `StringDecoder` 处理被切分的 UTF-8，64KB / 1s 刷新、关闭时 flush + fsync；达到

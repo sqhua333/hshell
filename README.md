@@ -280,6 +280,8 @@ picocom -b 115200 /tmp/ttyB       # 或 cat /tmp/ttyB / echo hello > /tmp/ttyB
 npm run dist:dir        # 未压缩目录 dist/linux-unpacked（本地冒烟用）
 npm run dist:linux      # AppImage + deb
 npm run dist:win        # NSIS 安装包（在 Linux 上交叉构建需要 wine）
+npm run dist:win:portable # 免安装单文件 exe（Linux 交叉构建无需 wine）
+npm run dist:win:zip      # 免安装 zip（Linux 交叉构建无需 wine）
 npm run dist:mac        # dmg + zip（需要 macOS 主机）
 npm run smoke:packaged  # 无头启动 dist/linux-unpacked 并检查 preload 与界面
 npm run icon            # 重新生成 build/ 下的图标（需要 Pillow）
@@ -290,7 +292,9 @@ npm run icon            # 重新生成 build/ 下的图标（需要 Pillow）
 可选原生绑定与测试文件。串口使用的 `@serialport/bindings-cpp` N-API 预编译绑定保留在
 `app.asar.unpacked` 中，可直接在 Electron ABI 下加载，无需 `electron-rebuild`。
 `.github/workflows/build.yml` 会在 Ubuntu、Windows 和 macOS 上分别产出安装包；
-Linux 本机构建 NSIS 需要额外安装 wine。
+Linux 本机构建 NSIS 需要额外安装 wine（electron-builder 会运行 32 位安装器以生成
+卸载程序，因此需要 wine32）。没有 wine 时可用 `dist:win:portable` 或 `dist:win:zip`
+产出免安装版本。
 
 发布前请把 `package.json` 中的 `homepage` 与维护者邮箱占位符（`example.com`）
 替换为真实信息。
