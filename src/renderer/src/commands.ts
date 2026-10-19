@@ -216,6 +216,12 @@ export async function runAction(action: ShortcutAction | string): Promise<void> 
         state.setSearchVisible(false)
       } else if (state.composeOpen) {
         state.setComposeOpen(false)
+      } else if (
+        state.activeRuntimeId &&
+        state.statuses[state.activeRuntimeId]?.status === 'failed'
+      ) {
+        // Dismiss the in-pane "connection failed" panel before touching toasts.
+        state.dismissFailure(state.activeRuntimeId)
       } else if (state.toasts.length > 0) {
         // Esc dismisses the most recent notification (e.g. a connection failure toast).
         state.removeToast(state.toasts[state.toasts.length - 1].id)

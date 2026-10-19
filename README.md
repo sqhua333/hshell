@@ -272,7 +272,8 @@ picocom -b 115200 /tmp/ttyB       # 或 cat /tmp/ttyB / echo hello > /tmp/ttyB
 | F1 / Alt+Enter / F11 | 快捷键帮助 / 全屏 |
 
 终端里的 `Ctrl+C` 仍然发送 SIGINT。右上角的通知提示（包括连接失败）可点击关闭，
-也可以按 `Esc` 关闭当前提示；有对话框或撰写窗格时 `Esc` 会优先关闭它们。
+也可以按 `Esc` 关闭当前提示；连接失败时终端内的错误面板同样可按 `Esc` 关闭，
+下次连接再次失败时会重新出现。有对话框或撰写窗格时 `Esc` 会优先关闭它们。
 
 ## 打包分发
 
@@ -295,6 +296,12 @@ npm run icon            # 重新生成 build/ 下的图标（需要 Pillow）
 Linux 本机构建 NSIS 需要额外安装 wine（electron-builder 会运行 32 位安装器以生成
 卸载程序，因此需要 wine32）。没有 wine 时可用 `dist:win:portable` 或 `dist:win:zip`
 产出免安装版本。
+
+Windows 免安装版不需要管理员权限（可执行文件清单为 `asInvoker`）。若双击后系统要求
+提权或没有窗口，通常是解压目录受策略限制（如 `Program Files`、AppLocker）或
+SmartScreen 拦截未签名程序，请解压到桌面/文档等普通用户目录后再运行。HShell 采用
+单实例：已有实例在运行（尤其是以管理员身份启动的实例）时，新启动会弹窗说明并退出。
+窗口在创建后立即显示，不等待渲染完成。
 
 发布前请把 `package.json` 中的 `homepage` 与维护者邮箱占位符（`example.com`）
 替换为真实信息。

@@ -89,7 +89,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { combo: 'alt+enter', action: 'window:fullscreen', label: '切换全屏', labelEn: 'Toggle full screen', display: 'Alt+Enter' },
       { combo: 'f11', action: 'window:fullscreen', label: '切换全屏', labelEn: 'Toggle full screen', display: 'F11' },
       { combo: 'f1', action: 'help:shortcuts', label: '快捷键帮助', labelEn: 'Keyboard shortcuts', display: 'F1' },
-      { combo: 'escape', action: 'dialog:close', label: '关闭对话框/查找栏', labelEn: 'Close dialog / find bar', display: 'Esc' },
+      { combo: 'escape', action: 'dialog:close', label: '关闭对话框/提示', labelEn: 'Close dialog / notice', display: 'Esc' },
       { combo: 'alt+1…9', action: 'tab:select', label: '切换到第 N 个标签页', labelEn: 'Switch to tab N', display: 'Alt+1 … Alt+9' }
     ]
   }

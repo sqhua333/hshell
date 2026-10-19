@@ -297,7 +297,7 @@ Ctrl+Shift+C / Ctrl+Insert。
 | `Ctrl++` / `Ctrl+-` / `Ctrl+0` | 放大 / 缩小 / 重置终端字号 |
 | `Alt+Enter` / `F11` | 切换全屏 |
 | `F1` | 快捷键帮助对话框 |
-| `Esc` | 关闭当前对话框或查找栏 |
+| `Esc` | 关闭当前对话框、查找栏或提示面板 |
 
 新增或调整快捷键时，必须同步修改：
 `src/renderer/src/lib/shortcuts.ts`（唯一注册表）、`src/main/menu.ts`（菜单加速键）、
@@ -723,7 +723,12 @@ mac:
   `@serialport/bindings-cpp` prebuilds 放在 `app.asar.unpacked`，打包产物已实测可
   `serial.list()` 并枚举真实设备。Windows `--dir`、免安装单文件
   （`dist:win:portable`，约 94MB）与 zip（`dist:win:zip`，约 146MB）产物已生成并检查，
-  ASAR 内包含当前源码；NSIS 安装包在 Linux 上交叉构建需要 wine32（electron-builder
+  ASAR 内包含当前源码。Windows 启动体验：窗口在 `BrowserWindow` 创建后立即显示
+  （不再等待 `ready-to-show`，冷启动/杀软扫描时不会长时间没有任何反馈）；单实例锁
+  获取失败时在 Windows 上弹窗说明原因（已有实例，或两个实例权限级别不同），而不是
+  静默退出。可执行文件清单为 `asInvoker`，程序本身不要求管理员权限；若解压目录受
+  策略限制（如 `Program Files`、AppLocker/SmartScreen 拦截未签名程序），需换到普通
+  用户目录运行。NSIS 安装包在 Linux 上交叉构建需要 wine32（electron-builder
   需运行 32 位安装器生成卸载程序，本机未安装），macOS 产物需要 macOS 主机，二者由
   `.github/workflows/build.yml` 在 CI 中构建。
 - **验证**：`npm run typecheck` 通过；默认 194 个测试通过（171 个单元 + 23 个集成
@@ -804,7 +809,8 @@ mac:
   静默掉线由 keepalive（15s×3）在约 60 秒内发现。连接状态变化也会以 `[HShell]`
   前缀写入终端回滚缓冲（掉线、正在重连、重连成功、连接失败），并给出
   `Ctrl+Shift+R` 重连 / `Ctrl+Shift+W` 停止重试的快捷键提示，避免只靠状态栏和
-  浮层导致用户漏看。
+  浮层导致用户漏看。连接失败时终端内的错误面板可按 `Esc` 关闭（状态栏仍保留失败
+  原因）；下一次连接失败时会重新出现。
 - P4 完成：`storage/vault.ts` 加密保险库，safeStorage 仅在加密可用且 Linux 后端
   不是 `basic_text` 时采用，否则回退主密码（scrypt N=2^15,r=8,p=1 + AES-256-GCM，
   主密码至少 8 位，校验值 `hshell-vault-v1`）。`ssh/key-service.ts` 负责生成与导入，

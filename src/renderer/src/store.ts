@@ -84,6 +84,8 @@ interface AppState {
   activeTabId: string | null
   activeRuntimeId: string | null
   statuses: Record<string, RuntimeStatus>
+  /** Runtimes whose "connection failed" overlay the user dismissed with Esc. */
+  failedDismissed: Record<string, boolean>
   zmodem: Record<string, ZmodemProgress>
   transfers: Record<string, SftpTransferProgress>
   tunnels: Record<string, TunnelInfo[]>
@@ -136,6 +138,7 @@ interface AppState {
   closePane(tabId: string, paneId: string): void
   setActiveRuntime(runtimeId: string): void
   setStatus(runtimeId: string, status: SshStatus, message?: string): void
+  dismissFailure(runtimeId: string): void
   setRuntimeSize(runtimeId: string, cols: number, rows: number): void
   setZmodemStatus(runtimeId: string, update: ZmodemStatusEvent): void
   setTransferProgress(runtimeId: string, update: SftpProgressEvent): void
@@ -255,6 +258,7 @@ export const useApp = create<AppState>((set, get) => ({
   activeTabId: null,
   activeRuntimeId: null,
   statuses: {},
+  failedDismissed: {},
   zmodem: {},
   transfers: {},
   tunnels: {},
@@ -501,9 +505,19 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   setStatus(runtimeId, status, message) {
-    set((state) => ({
-      statuses: { ...state.statuses, [runtimeId]: { ...state.statuses[runtimeId], status, message } }
-    }))
+    set((state) => {
+      // Leaving the failed state re-arms the dismissible error overlay.
+      const failedDismissed = { ...state.failedDismissed }
+      if (status !== 'failed') delete failedDismissed[runtimeId]
+      return {
+        statuses: { ...state.statuses, [runtimeId]: { ...state.statuses[runtimeId], status, message } },
+        failedDismissed
+      }
+    })
+  },
+
+  dismissFailure(runtimeId) {
+    set((state) => ({ failedDismissed: { ...state.failedDismissed, [runtimeId]: true } }))
   },
 
   setRuntimeSize(runtimeId, cols, rows) {

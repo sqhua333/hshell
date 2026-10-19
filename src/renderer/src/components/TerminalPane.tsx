@@ -102,6 +102,7 @@ export function TerminalPane({
 
   const status = useApp((state) => state.statuses[runtimeId])
   const connectionStatus = status?.status
+  const failureDismissed = useApp((state) => state.failedDismissed[runtimeId] ?? false)
   const statusMessage = status?.message
   const previousStatusRef = useRef<string | undefined>(undefined)
   const fontSize = useApp((state) => state.fontSize)
@@ -459,7 +460,7 @@ export function TerminalPane({
         </div>
       ) : null}
 
-      {currentStatus === 'failed' ? (
+      {currentStatus === 'failed' && !failureDismissed ? (
         <div className="terminal-error">
           <div className="terminal-error-icon">
             <Icon name="alert-triangle" size={22} />

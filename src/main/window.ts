@@ -14,7 +14,11 @@ export function createWindow(): BrowserWindow {
     height: 860,
     minWidth: 980,
     minHeight: 620,
-    show: false,
+    // Show the frame as soon as the main process is ready. Waiting for
+    // `ready-to-show` can leave the user staring at nothing for seconds on a
+    // cold Windows start (AV scan, unsigned exe), and a blocked renderer would
+    // never reveal a window at all.
+    show: true,
     title: 'HShell',
     icon,
     backgroundColor: '#eef1f5',
@@ -32,7 +36,6 @@ export function createWindow(): BrowserWindow {
   win.once('ready-to-show', () => {
     // Electron only publishes _NET_WM_ICON reliably once the window is shown.
     if (!icon.isEmpty()) win.setIcon(icon)
-    win.show()
   })
 
   win.webContents.setWindowOpenHandler(({ url }) => {
