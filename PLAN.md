@@ -740,7 +740,10 @@ mac:
   ASAR 内包含当前源码。Windows 启动体验：窗口在 `BrowserWindow` 创建后立即显示
   （不再等待 `ready-to-show`，冷启动/杀软扫描时不会长时间没有任何反馈）；单实例锁
   获取失败时在 Windows 上弹窗说明原因（已有实例，或两个实例权限级别不同），而不是
-  静默退出。可执行文件清单为 `asInvoker`，程序本身不要求管理员权限；若解压目录受
+  静默退出。渲染页面加载失败（例如 `app.asar` 解压不完整、被占用或被杀软拦截）时，
+  主进程会把 `did-fail-load`、`render-process-gone`、preload 与渲染进程错误写入
+  `<userData>/renderer-errors.log` 并弹窗提示；`index.html` 内置静态加载提示，避免
+  出现没有任何信息的白屏。可执行文件清单为 `asInvoker`，程序本身不要求管理员权限；若解压目录受
   策略限制（如 `Program Files`、AppLocker/SmartScreen 拦截未签名程序），需换到普通
   用户目录运行。NSIS 安装包在 Linux 上交叉构建需要 wine32（electron-builder
   需运行 32 位安装器生成卸载程序，本机未安装），macOS 产物需要 macOS 主机，二者由
