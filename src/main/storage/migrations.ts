@@ -85,6 +85,18 @@ export function migrateSessions(raw: unknown, fromVersion: number): Session[] {
         : {}
     delete auth.password
     source.auth = auth
+    if (Array.isArray(source.jumpHosts)) {
+      source.jumpHosts = source.jumpHosts.map((entry) => {
+        if (!entry || typeof entry !== 'object') return entry
+        const jump = { ...(entry as Record<string, unknown>) }
+        if (jump.auth && typeof jump.auth === 'object') {
+          const jumpAuth = { ...(jump.auth as Record<string, unknown>) }
+          delete jumpAuth.password
+          jump.auth = jumpAuth
+        }
+        return jump
+      })
+    }
 
     if (fromVersion < 2 && source.proxyJump === undefined) {
       source.proxyJump = null

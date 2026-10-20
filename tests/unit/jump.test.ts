@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatProxyJump, parseProxyJump } from '../../src/main/ssh/jump'
+import { formatProxyJump, parseProxyJump } from '../../src/shared/jump'
 
 describe('parseProxyJump', () => {
   it('treats empty and none as no jump host', () => {

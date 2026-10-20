@@ -15,6 +15,17 @@ export interface AuthConfig {
   savePassword?: boolean
 }
 
+/** One hop in a jump-host chain, with credentials that may differ per hop. */
+export interface JumpHostConfig {
+  id: string
+  host: string
+  port: number
+  /** Empty string falls back to the session username. */
+  username: string
+  /** Omitted means "same authentication as the session". */
+  auth?: AuthConfig
+}
+
 export interface TerminalOptions {
   term: string
   theme: TerminalTheme
@@ -117,6 +128,11 @@ export interface Session {
   serial?: SerialOptions
   /** ProxyJump target, e.g. `bastion` or `user@bastion:2222`. */
   proxyJump?: string | null
+  /**
+   * Structured jump chain with per-hop credentials. Takes precedence over
+   * `proxyJump`; the string is kept in sync for older versions and exports.
+   */
+  jumpHosts?: JumpHostConfig[]
   /** Command buttons in the session's bottom bar. */
   quickCommands?: QuickCommand[]
   /** Output-triggered actions. */

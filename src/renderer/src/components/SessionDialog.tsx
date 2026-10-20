@@ -1,9 +1,11 @@
 import { useEffect, useState, type ReactElement } from 'react'
 import type {
+  AuthConfig,
   AuthMethod,
   ConnectionType,
   Folder,
   HighlightRule,
+  JumpHostConfig,
   KeyMetadata,
   LogFormat,
   QuickCommand,
@@ -15,6 +17,7 @@ import type {
   Session,
   TriggerRule
 } from '@shared/types'
+import { formatProxyJump, parseProxyJump } from '@shared/jump'
 import { api } from '../api'
 import { COLOR_SCHEMES, legacyThemeForScheme, resolveColorScheme } from '../lib/color-schemes'
 import { tr } from '../lib/i18n'
@@ -24,6 +27,41 @@ import { Modal } from './Modal'
 
 function ruleId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+}
+
+/** Editable jump host; the port stays a string while the user types. */
+interface JumpDraft {
+  id: string
+  host: string
+  port: string
+  username: string
+  auth?: AuthConfig
+}
+
+function initialJumpHosts(initial: Session | null): JumpDraft[] {
+  if (!initial) return []
+  if (initial.jumpHosts?.length) {
+    return initial.jumpHosts.map((jump) => ({
+      id: jump.id,
+      host: jump.host,
+      port: String(jump.port),
+      username: jump.username ?? '',
+      auth: jump.auth ? { ...jump.auth } : undefined
+    }))
+  }
+  let hops: ReturnType<typeof parseProxyJump> = []
+  try {
+    hops = parseProxyJump(initial.proxyJump)
+  } catch {
+    /* Invalid legacy values are shown as an empty chain. */
+  }
+  return hops.map((hop) => ({
+    id: ruleId('jump'),
+    host: hop.host,
+    port: String(hop.port),
+    username: hop.username ?? '',
+    auth: undefined
+  }))
 }
 
 const ALGORITHM_LABEL: Record<KeyMetadata['algorithm'], string> = {
@@ -84,7 +122,12 @@ function SessionDialogInner({
   const [host, setHost] = useState(initial?.host ?? '')
   const [port, setPort] = useState(String(initial?.port ?? 22))
   const [username, setUsername] = useState(initial?.username ?? defaultUsername)
-  const [proxyJump, setProxyJump] = useState(initial?.proxyJump ?? '')
+  const [jumpHosts, setJumpHosts] = useState<JumpDraft[]>(() => initialJumpHosts(initial))
+  const savedJumpPasswords = new Set(
+    (initial?.jumpHosts ?? [])
+      .filter((jump) => jump.auth?.method === 'password' && jump.auth.savePassword)
+      .map((jump) => jump.id)
+  )
   const [serialPath, setSerialPath] = useState(initial?.serial?.path ?? '')
   const [serialPorts, setSerialPorts] = useState<SerialPortInfo[]>([])
   const [portListNonce, setPortListNonce] = useState(0)
@@ -166,6 +209,35 @@ function SessionDialogInner({
     if (file) setKeyPath(file)
   }
 
+  const updateJump = (id: string, patch: Partial<JumpDraft>): void =>
+    setJumpHosts((list) => list.map((item) => (item.id === id ? { ...item, ...patch } : item)))
+
+  const updateJumpAuth = (id: string, patch: Partial<AuthConfig>): void =>
+    setJumpHosts((list) =>
+      list.map((item) =>
+        item.id === id
+          ? { ...item, auth: { ...(item.auth ?? { method: 'password' }), ...patch } }
+          : item
+      )
+    )
+
+  const changeJumpMethod = (id: string, value: string): void => {
+    if (value === 'inherit') updateJump(id, { auth: undefined })
+    else updateJump(id, { auth: { method: value as AuthMethod } })
+  }
+
+  const addJump = (): void =>
+    setJumpHosts((list) =>
+      list.length >= 8
+        ? list
+        : [...list, { id: ruleId('jump'), host: '', port: '22', username: '', auth: undefined }]
+    )
+
+  const browseJumpKey = async (id: string): Promise<void> => {
+    const file = await api.fs.pickFile()
+    if (file) updateJumpAuth(id, { keyPath: file })
+  }
+
   const browseLogDirectory = async (): Promise<void> => {
     const directory = await api.fs.pickDirectory()
     if (directory) setLogDirectory(directory)
@@ -178,6 +250,83 @@ function SessionDialogInner({
     const serialValue = serialPath.trim()
     const baudValue = Number(baudRate)
     const isSerial = connectionType === 'serial'
+
+    const cleanJumps: JumpHostConfig[] = []
+    if (!isSerial) {
+      for (const [index, jump] of jumpHosts.entries()) {
+        const jumpHost = jump.host.trim()
+        const jumpPort = Number(jump.port)
+        if (!jumpHost) {
+          setTab('connection')
+          setError(tr(`第 ${index + 1} 跳缺少主机地址`, `Hop ${index + 1} has no host`))
+          return
+        }
+        if (!Number.isInteger(jumpPort) || jumpPort < 1 || jumpPort > 65535) {
+          setTab('connection')
+          setError(
+            tr(
+              `第 ${index + 1} 跳的端口必须是 1 到 65535 之间的整数`,
+              `Hop ${index + 1} port must be an integer between 1 and 65535`
+            )
+          )
+          return
+        }
+        const jumpAuth = jump.auth
+        if (jumpAuth?.method === 'key' && !jumpAuth.keyId && !(jumpAuth.keyPath ?? '').trim()) {
+          setTab('connection')
+          setError(
+            tr(
+              `请为第 ${index + 1} 跳选择密钥或私钥文件`,
+              `Choose a key or private key file for hop ${index + 1}`
+            )
+          )
+          return
+        }
+        if (
+          jumpAuth?.method === 'password' &&
+          jumpAuth.savePassword &&
+          !jumpAuth.password &&
+          !savedJumpPasswords.has(jump.id)
+        ) {
+          setTab('connection')
+          setError(
+            tr(
+              `请先输入第 ${index + 1} 跳要保存的密码`,
+              `Enter the password to save for hop ${index + 1}`
+            )
+          )
+          return
+        }
+
+        let cleanedAuth: AuthConfig | undefined
+        if (jumpAuth) {
+          if (jumpAuth.method === 'password') {
+            cleanedAuth = {
+              method: 'password',
+              password: jumpAuth.password || undefined,
+              savePassword: Boolean(jumpAuth.savePassword)
+            }
+          } else if (jumpAuth.method === 'key') {
+            cleanedAuth = {
+              method: 'key',
+              keyId: jumpAuth.keyId || undefined,
+              keyPath: jumpAuth.keyId ? undefined : jumpAuth.keyPath?.trim() || undefined,
+              password: jumpAuth.keyId ? undefined : jumpAuth.password || undefined
+            }
+          } else {
+            cleanedAuth = { method: jumpAuth.method }
+          }
+        }
+
+        cleanJumps.push({
+          id: jump.id,
+          host: jumpHost,
+          port: jumpPort,
+          username: jump.username.trim(),
+          auth: cleanedAuth
+        })
+      }
+    }
 
     if (isSerial) {
       if (!serialValue) {
@@ -286,7 +435,17 @@ function SessionDialogInner({
             rts
           }
         : undefined,
-      proxyJump: isSerial ? null : proxyJump.trim() || null,
+      proxyJump:
+        isSerial || cleanJumps.length === 0
+          ? null
+          : formatProxyJump(
+              cleanJumps.map((jump) => ({
+                host: jump.host,
+                port: jump.port,
+                username: jump.username || undefined
+              }))
+            ),
+      jumpHosts: !isSerial && cleanJumps.length > 0 ? cleanJumps : undefined,
       auth: isSerial
         ? { method: 'agent' }
         : {
@@ -476,16 +635,6 @@ function SessionDialogInner({
                         placeholder="root"
                       />
                     </label>
-                    <label className="field">
-                      <span>{tr('跳板机（ProxyJump，可选）', 'Jump host (ProxyJump, optional)')}</span>
-                      <input
-                        className="input"
-                        value={proxyJump}
-                        onChange={(event) => setProxyJump(event.target.value)}
-                        placeholder={tr('user@bastion:22 或 hop1,hop2', 'user@bastion:22 or hop1,hop2')}
-                        spellCheck={false}
-                      />
-                    </label>
                   </>
                 ) : (
                   <>
@@ -595,6 +744,233 @@ function SessionDialogInner({
                   </>
                 )}
               </div>
+              {connectionType === 'ssh' ? (
+                <>
+                  <div className="section-title jump-title">
+                    <span>{tr('跳板机（可选）', 'Jump hosts (optional)')}</span>
+                    <button
+                      type="button"
+                      className="btn btn-small"
+                      onClick={addJump}
+                      disabled={jumpHosts.length >= 8}
+                    >
+                      <Icon name="plus" size={14} />
+                      {tr('添加跳板机', 'Add jump host')}
+                    </button>
+                  </div>
+                  <div className="form-hint">
+                    {tr(
+                      '按列表顺序逐跳连接，最多 8 跳。每跳可单独设置用户名与认证方式；选择「与主机会话相同」则复用主机的凭据。',
+                      'Hops are connected in list order, up to 8. Each hop can use its own username and authentication; choose “Same as session” to reuse the session credentials.'
+                    )}
+                  </div>
+                  <div className="jump-list">
+                    {jumpHosts.map((jump, index) => {
+                      const jumpMethod = jump.auth?.method ?? 'inherit'
+                      return (
+                        <div className="jump-card" key={jump.id}>
+                          <div className="jump-card-head">
+                            <strong>{tr(`第 ${index + 1} 跳`, `Hop ${index + 1}`)}</strong>
+                            <button
+                              type="button"
+                              className="icon-btn mini danger"
+                              title={tr('删除该跳板机', 'Remove this jump host')}
+                              onClick={() =>
+                                setJumpHosts((list) => list.filter((item) => item.id !== jump.id))
+                              }
+                            >
+                              <Icon name="trash" size={13} />
+                            </button>
+                          </div>
+                          <div className="form-grid">
+                            <label className="field">
+                              <span>{tr('主机', 'Host')}</span>
+                              <input
+                                className="input"
+                                value={jump.host}
+                                onChange={(event) => updateJump(jump.id, { host: event.target.value })}
+                                placeholder={tr('bastion.example.com', 'bastion.example.com')}
+                                spellCheck={false}
+                              />
+                            </label>
+                            <label className="field">
+                              <span>{tr('端口', 'Port')}</span>
+                              <input
+                                className="input"
+                                value={jump.port}
+                                onChange={(event) => updateJump(jump.id, { port: event.target.value })}
+                                inputMode="numeric"
+                              />
+                            </label>
+                            <label className="field">
+                              <span>{tr('用户名', 'Username')}</span>
+                              <input
+                                className="input"
+                                value={jump.username}
+                                onChange={(event) =>
+                                  updateJump(jump.id, { username: event.target.value })
+                                }
+                                placeholder={tr('留空使用主机用户名', 'Empty uses the session username')}
+                              />
+                            </label>
+                            <label className="field">
+                              <span>{tr('认证方式', 'Authentication')}</span>
+                              <select
+                                className="input"
+                                value={jumpMethod}
+                                onChange={(event) => changeJumpMethod(jump.id, event.target.value)}
+                              >
+                                <option value="inherit">
+                                  {tr('与主机会话相同', 'Same as session')}
+                                </option>
+                                <option value="password">{tr('密码', 'Password')}</option>
+                                <option value="key">
+                                  {tr('公钥（私钥文件）', 'Public key (private key file)')}
+                                </option>
+                                <option value="agent">SSH Agent</option>
+                                <option value="keyboard-interactive">
+                                  {tr('键盘交互', 'Keyboard-interactive')}
+                                </option>
+                              </select>
+                            </label>
+                          </div>
+
+                          {jumpMethod === 'password' ? (
+                            <div className="form-grid">
+                              <label className="field">
+                                <span>{tr('密码', 'Password')}</span>
+                                <input
+                                  className="input"
+                                  type="password"
+                                  value={jump.auth?.password ?? ''}
+                                  onChange={(event) =>
+                                    updateJumpAuth(jump.id, { password: event.target.value })
+                                  }
+                                  placeholder={
+                                    jump.auth?.savePassword
+                                      ? tr('已保存；留空保持不变', 'Saved; leave blank to keep it')
+                                      : tr('仅保存在内存中', 'Kept in memory only')
+                                  }
+                                />
+                              </label>
+                              <label className="check-row">
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(jump.auth?.savePassword)}
+                                  onChange={(event) =>
+                                    updateJumpAuth(jump.id, { savePassword: event.target.checked })
+                                  }
+                                />
+                                {tr(
+                                  '保存密码（本机加密存储）',
+                                  'Save password (encrypted locally)'
+                                )}
+                              </label>
+                            </div>
+                          ) : null}
+
+                          {jumpMethod === 'key' ? (
+                            <>
+                              <div className="form-grid">
+                                <label className="field">
+                                  <span>{tr('私钥来源', 'Private key source')}</span>
+                                  <select
+                                    className="input"
+                                    value={jump.auth?.keyId ?? ''}
+                                    onChange={(event) => {
+                                      const keyId = event.target.value
+                                      updateJumpAuth(
+                                        jump.id,
+                                        keyId
+                                          ? { keyId, keyPath: undefined, password: undefined }
+                                          : { keyId: undefined }
+                                      )
+                                    }}
+                                  >
+                                    <option value="">{tr('私钥文件', 'Private key file')}</option>
+                                    {vaultKeys.map((key) => (
+                                      <option key={key.id} value={key.id}>
+                                        {tr('保险库', 'Vault')}: {key.label} (
+                                        {ALGORITHM_LABEL[key.algorithm]})
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                                {!jump.auth?.keyId ? (
+                                  <>
+                                    <label className="field">
+                                      <span>{tr('私钥文件', 'Private key file')}</span>
+                                      <div className="input-row">
+                                        <input
+                                          className="input"
+                                          value={jump.auth?.keyPath ?? ''}
+                                          onChange={(event) =>
+                                            updateJumpAuth(jump.id, {
+                                              keyPath: event.target.value
+                                            })
+                                          }
+                                          placeholder="~/.ssh/id_rsa"
+                                        />
+                                        <button
+                                          type="button"
+                                          className="btn"
+                                          onClick={() => void browseJumpKey(jump.id)}
+                                        >
+                                          {tr('浏览…', 'Browse…')}
+                                        </button>
+                                      </div>
+                                    </label>
+                                    <label className="field">
+                                      <span>{tr('私钥口令（可选）', 'Key passphrase (optional)')}</span>
+                                      <input
+                                        className="input"
+                                        type="password"
+                                        value={jump.auth?.password ?? ''}
+                                        onChange={(event) =>
+                                          updateJumpAuth(jump.id, {
+                                            password: event.target.value
+                                          })
+                                        }
+                                        placeholder={tr('仅保存在内存中', 'Kept in memory only')}
+                                      />
+                                    </label>
+                                  </>
+                                ) : null}
+                              </div>
+                              {jump.auth?.keyId ? (
+                                <div className="form-hint">
+                                  {tr(
+                                    '私钥及其口令在连接时由主进程从保险库解密。',
+                                    'The key and its passphrase are decrypted from the vault by the main process when connecting.'
+                                  )}
+                                </div>
+                              ) : null}
+                            </>
+                          ) : null}
+
+                          {jumpMethod === 'agent' ? (
+                            <div className="form-hint">
+                              {tr(
+                                '使用 SSH_AUTH_SOCK 指向的 agent 认证这一跳。',
+                                'Authenticate this hop with the agent in SSH_AUTH_SOCK.'
+                              )}
+                            </div>
+                          ) : null}
+
+                          {jumpMethod === 'keyboard-interactive' ? (
+                            <div className="form-hint">
+                              {tr(
+                                '连接时由该跳板机发起交互式提示。',
+                                'This hop prompts interactively during connection.'
+                              )}
+                            </div>
+                          ) : null}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </>
+              ) : null}
               {connectionType === 'serial' ? (
                 <div className="check-inline">
                   <label>
@@ -622,8 +998,8 @@ function SessionDialogInner({
                       'Serial settings are stored locally. Type the device path or pick one from the list. On Linux, add your user to the dialout group if access is denied.'
                     )
                   : tr(
-                      '连接信息会保存到本地；密码默认只留在内存，可在「身份验证」中勾选加密保存。跳板机使用与主机会话相同的认证方式，多跳用逗号分隔。',
-                      'Connection details are stored locally. Passwords stay in memory unless you enable encrypted saving under Authentication. Jump hosts use the same authentication method as the session; separate multiple hops with commas.'
+                      '连接信息会保存到本地；密码默认只留在内存，可在「身份验证」或各跳板机中勾选加密保存。跳板机按列表顺序逐跳连接，每跳可使用独立账号与认证方式。',
+                      'Connection details are stored locally. Passwords stay in memory unless you enable encrypted saving under Authentication or on a jump host. Hops connect in list order and may use their own accounts and authentication.'
                     )}
               </div>
             </>

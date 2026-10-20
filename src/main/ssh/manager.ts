@@ -22,15 +22,16 @@ import {
 } from 'ssh2'
 import type {
   AppEvent,
+  AuthConfig,
   ConnectRequest,
   FileEntry,
   Session,
   TunnelConfig,
   TunnelInfo
 } from '@shared/types'
+import { parseProxyJump } from '@shared/jump'
 import { resolveLogDirectory, SessionLogger } from '../storage/session-log'
 import { ForwardService } from './forward-service'
-import { parseProxyJump, type JumpHop } from './jump'
 import { KnownHosts, fingerprintOf, parseKeyAlgorithm } from './known-hosts'
 import { buildAuthorizedKeysCommand, type PrivateKeyRecord } from './key-service'
 import {
@@ -59,6 +60,13 @@ interface PendingKeyboard {
   finish: (responses: string[]) => void
   timer: NodeJS.Timeout
   client: Client
+}
+
+interface ResolvedJump {
+  host: string
+  port: number
+  username: string
+  auth: AuthConfig
 }
 
 interface Runtime {
@@ -225,9 +233,9 @@ export class SshManager {
   /** Build the ssh2 config for a target host, including the auth method. */
   private connectionOptions(
     rt: Runtime,
-    target: { host: string; port: number; username: string }
+    target: { host: string; port: number; username: string },
+    auth: AuthConfig = rt.session.auth
   ): ConnectConfig {
-    const { session } = rt
     const options: ConnectConfig = {
       host: target.host,
       port: target.port,
@@ -241,21 +249,21 @@ export class SshManager {
       }
     }
 
-    switch (session.auth.method) {
+    switch (auth.method) {
       case 'password':
-        options.password = session.auth.password ?? ''
+        options.password = auth.password ?? ''
         break
       case 'key': {
-        if (session.auth.keyId) {
-          const record = this.resolveKey?.(session.auth.keyId)
+        if (auth.keyId) {
+          const record = this.resolveKey?.(auth.keyId)
           if (!record) throw new Error('密钥不存在或保险库已锁定')
           options.privateKey = record.privateKey
           if (record.passphrase) options.passphrase = record.passphrase
           break
         }
-        const keyPath = expandHome(session.auth.keyPath || '~/.ssh/id_rsa')
+        const keyPath = expandHome(auth.keyPath || '~/.ssh/id_rsa')
         options.privateKey = readFileSyncSafely(keyPath)
-        if (session.auth.password) options.passphrase = session.auth.password
+        if (auth.password) options.passphrase = auth.password
         break
       }
       case 'agent':
@@ -268,6 +276,28 @@ export class SshManager {
     return options
   }
 
+  /**
+   * Resolve the jump chain. Structured `jumpHosts` win; each hop may carry
+   * its own auth. Legacy `proxyJump` strings reuse the session auth.
+   */
+  private resolveJumps(rt: Runtime): ResolvedJump[] {
+    const { session } = rt
+    if (session.jumpHosts && session.jumpHosts.length > 0) {
+      return session.jumpHosts.map((jump) => ({
+        host: jump.host,
+        port: jump.port,
+        username: jump.username || session.username,
+        auth: jump.auth ?? session.auth
+      }))
+    }
+    return parseProxyJump(session.proxyJump).map((hop) => ({
+      host: hop.host,
+      port: hop.port,
+      username: hop.username ?? session.username,
+      auth: session.auth
+    }))
+  }
+
   /** Open (or re-open) the SSH connection for a runtime. */
   private open(rt: Runtime): void {
     if (rt.manualClose) return
@@ -275,9 +305,9 @@ export class SshManager {
     rt.authenticated = false
     this.closeJump(rt)
 
-    let hops: JumpHop[]
+    let hops: ResolvedJump[]
     try {
-      hops = parseProxyJump(rt.session.proxyJump)
+      hops = this.resolveJumps(rt)
     } catch (err) {
       this.fail(rt, (err as Error).message)
       return
@@ -307,7 +337,7 @@ export class SshManager {
   /** Connect through one ProxyJump hop, then continue to the next or final host. */
   private openJumpHop(
     rt: Runtime,
-    hops: JumpHop[],
+    hops: ResolvedJump[],
     index: number,
     sock: ClientChannel | null,
     epoch: number
@@ -315,11 +345,11 @@ export class SshManager {
     const hop = hops[index]
     let options: ConnectConfig
     try {
-      options = this.connectionOptions(rt, {
-        host: hop.host,
-        port: hop.port,
-        username: hop.username ?? rt.session.username
-      })
+      options = this.connectionOptions(
+        rt,
+        { host: hop.host, port: hop.port, username: hop.username },
+        hop.auth
+      )
     } catch (err) {
       this.fail(rt, friendlyError(err as Error))
       return
@@ -330,7 +360,7 @@ export class SshManager {
     rt.jumpClients.push(client)
     let ready = false
 
-    this.attachKeyboardInteractive(rt, client, epoch)
+    this.attachKeyboardInteractive(rt, client, epoch, `跳板机 ${hop.host}`)
 
     client.on('ready', () => {
       if (rt.epoch !== epoch) {
@@ -399,7 +429,12 @@ export class SshManager {
     }
   }
 
-  private attachKeyboardInteractive(rt: Runtime, client: Client, epoch: number): void {
+  private attachKeyboardInteractive(
+    rt: Runtime,
+    client: Client,
+    epoch: number,
+    label = '键盘交互认证'
+  ): void {
     client.on('keyboard-interactive', (_name, instructions, _lang, prompts, finish) => {
       if (rt.epoch !== epoch) {
         finish([])
@@ -424,7 +459,7 @@ export class SshManager {
         runtimeId: rt.runtimeId,
         prompt: {
           requestId,
-          name: '键盘交互认证',
+          name: label,
           instructions: instructions || '',
           prompts: prompts.map((p) => ({ prompt: p.prompt, echo: p.echo !== false }))
         }

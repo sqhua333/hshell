@@ -60,6 +60,33 @@ describe('migrations', () => {
     expect(sessions[0].proxyJump).toBeNull()
   })
 
+  it('strips jump host passwords when loading', () => {
+    const sessions = migrateSessions(
+      [
+        {
+          ...makeSession(),
+          jumpHosts: [
+            {
+              id: 'jump-1',
+              host: 'bastion',
+              port: 22,
+              username: 'jumper',
+              auth: { method: 'password', password: 'hop-secret', savePassword: true }
+            }
+          ]
+        }
+      ],
+      3
+    )
+
+    expect(sessions).toHaveLength(1)
+    expect(sessions[0].jumpHosts?.[0].auth).toMatchObject({
+      method: 'password',
+      savePassword: true
+    })
+    expect(sessions[0].jumpHosts?.[0].auth?.password).toBeUndefined()
+  })
+
   it('detects folder cycles and dangling parents', () => {
     const folders = [
       { id: 'a', name: 'A', parentId: 'b', sortOrder: 0 },
@@ -102,6 +129,37 @@ describe('export / import', () => {
     expect(merged.sessions).toBe(1)
     expect(merged.data.sessions[0]).toMatchObject({ id: 's-1', folderId: 'f-1' })
     expect(merged.data.sessions[0].auth.password).toBeUndefined()
+  })
+
+  it('omits jump host passwords from exports', () => {
+    const session = makeSession({
+      id: 's-jump-export',
+      jumpHosts: [
+        {
+          id: 'jump-1',
+          host: 'bastion',
+          port: 2222,
+          username: 'jumper',
+          auth: { method: 'password', password: 'hop-secret', savePassword: true }
+        }
+      ]
+    })
+
+    const { bundle } = buildExportBundle(
+      { folders: [], sessions: [session] },
+      { appName: 'HShell', appVersion: '1.0.0' }
+    )
+    const text = serializeBundle(bundle)
+    expect(text).not.toContain('hop-secret')
+    expect(bundle.sessions[0].jumpHosts?.[0].auth?.password).toBeUndefined()
+
+    const merged = mergeSessions({ folders: [], sessions: [] }, parseExportBundle(text))
+    expect(merged.data.sessions[0].jumpHosts?.[0]).toMatchObject({
+      id: 'jump-1',
+      host: 'bastion',
+      port: 2222,
+      username: 'jumper'
+    })
   })
 
   it('remaps colliding ids and can skip duplicate endpoints', () => {
@@ -252,6 +310,35 @@ describe('AppStore persistence', () => {
     expect(session).toBeDefined()
     expect(session!.auth.password).toBeUndefined()
     expect(session!.proxyJump).toBeNull()
+  })
+
+  it('never writes jump host passwords to disk', () => {
+    const dir = tempDir('hshell-store-jump-')
+    const store = new AppStore(dir)
+    store.saveSession(
+      makeSession({
+        id: 's-jump',
+        jumpHosts: [
+          {
+            id: 'jump-1',
+            host: 'bastion',
+            port: 22,
+            username: 'jumper',
+            auth: { method: 'password', password: 'hop-secret', savePassword: true }
+          }
+        ]
+      })
+    )
+
+    const raw = readFileSync(join(dir, 'sessions.json'), 'utf8')
+    expect(raw).not.toContain('hop-secret')
+
+    const session = new AppStore(dir).list().sessions.find((item) => item.id === 's-jump')
+    expect(session?.jumpHosts?.[0].auth).toMatchObject({
+      method: 'password',
+      savePassword: true
+    })
+    expect(session?.jumpHosts?.[0].auth?.password).toBeUndefined()
   })
 
   it('migrates v1 files and rejects folder cycles', () => {

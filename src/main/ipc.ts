@@ -38,6 +38,11 @@ import {
   serializeBundle
 } from './storage/export-import'
 import { sshConfigToSessions } from './storage/ssh-config'
+import {
+  attachStoredCredentials,
+  jumpCredentialId,
+  sessionCredentialId
+} from './storage/session-credentials'
 
 const MAX_IMPORT_BYTES = 20 * 1024 * 1024
 const MAX_SSH_CONFIG_BYTES = 2 * 1024 * 1024
@@ -183,18 +188,38 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   handle('sessions:list', () => store.list())
   handle('sessions:save', (input: Session) => {
     const parsed = sessionSchema.parse(input)
+    const previous = store.findSession(parsed.id)
     const saved = store.saveSession(parsed)
     if (parsed.auth.savePassword && parsed.auth.password) {
-      credentials.put(`session:${saved.id}`, parsed.auth.password)
+      credentials.put(sessionCredentialId(saved.id), parsed.auth.password)
     } else if (!parsed.auth.savePassword) {
-      credentials.remove(`session:${saved.id}`)
+      credentials.remove(sessionCredentialId(saved.id))
+    }
+
+    const keptJumpIds = new Set<string>()
+    for (const jump of parsed.jumpHosts ?? []) {
+      keptJumpIds.add(jump.id)
+      const key = jumpCredentialId(saved.id, jump.id)
+      const auth = jump.auth
+      if (auth?.method === 'password' && auth.savePassword) {
+        if (auth.password) credentials.put(key, auth.password)
+      } else {
+        credentials.remove(key)
+      }
+    }
+    for (const jump of previous?.jumpHosts ?? []) {
+      if (!keptJumpIds.has(jump.id)) credentials.remove(jumpCredentialId(saved.id, jump.id))
     }
     return saved
   })
   handle('sessions:remove', (id: string) => {
     const sessionId = String(id)
+    const previous = store.findSession(sessionId)
     store.removeSession(sessionId)
-    credentials.remove(`session:${sessionId}`)
+    credentials.remove(sessionCredentialId(sessionId))
+    for (const jump of previous?.jumpHosts ?? []) {
+      credentials.remove(jumpCredentialId(sessionId, jump.id))
+    }
   })
   handle('folders:save', (input: Folder) => store.saveFolder(folderSchema.parse(input)))
   handle('folders:remove', (id: string) => store.removeFolder(String(id)))
@@ -317,11 +342,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
       await serial.connect(parsed)
       return
     }
-    let session = parsed.session
-    if (session.auth.method === 'password' && !session.auth.password) {
-      const saved = credentials.get(`session:${session.id}`)
-      if (saved) session = { ...session, auth: { ...session.auth, password: saved } }
-    }
+    const session = attachStoredCredentials(parsed.session, credentials)
     await ssh.connect({ ...parsed, session })
   })
   // Serial runtimes use the same channels; dispatch by runtime ownership.

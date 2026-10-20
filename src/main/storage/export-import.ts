@@ -46,9 +46,16 @@ function defaultIdFactory(prefix: string): string {
 function stripPassword(session: Session): ExportBundle['sessions'][number] {
   const auth = { ...session.auth }
   delete auth.password
+  const jumpHosts = session.jumpHosts?.map((jump) => {
+    if (!jump.auth) return { ...jump }
+    const jumpAuth = { ...jump.auth }
+    delete jumpAuth.password
+    return { ...jump, auth: jumpAuth }
+  })
   return {
     ...session,
     auth,
+    ...(jumpHosts ? { jumpHosts } : {}),
     proxyJump: session.proxyJump ?? null
   }
 }
@@ -256,12 +263,24 @@ export function mergeSessions(
 
     const keyPath = source.auth.keyPath
     const mappedKeyPath = keyPath ? (options.keyMap?.get(keyPath) ?? keyPath) : undefined
+    const jumpHosts = source.jumpHosts?.map((jump) => {
+      if (!jump.auth) return { ...jump }
+      const jumpKeyPath = jump.auth.keyPath
+      return {
+        ...jump,
+        auth: {
+          ...jump.auth,
+          keyPath: jumpKeyPath ? (options.keyMap?.get(jumpKeyPath) ?? jumpKeyPath) : undefined
+        }
+      }
+    })
 
     importedSessions.push({
       ...source,
       id,
       folderId: source.folderId ? (folderMap.get(source.folderId) ?? null) : null,
       auth: { ...source.auth, keyPath: mappedKeyPath },
+      ...(jumpHosts ? { jumpHosts } : {}),
       proxyJump: source.proxyJump ?? null
     })
     existingKeys.add(dedupeKey)

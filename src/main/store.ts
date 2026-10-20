@@ -152,6 +152,12 @@ export class AppStore {
     const existing = this.sessions.find((s) => s.id === input.id)
     const auth = { ...input.auth }
     delete auth.password
+    const jumpHosts = input.jumpHosts?.map((jump) => {
+      if (!jump.auth) return { ...jump }
+      const jumpAuth = { ...jump.auth }
+      delete jumpAuth.password
+      return { ...jump, auth: jumpAuth }
+    })
     const folderId =
       input.folderId && !this.folders.some((folder) => folder.id === input.folderId)
         ? null
@@ -159,6 +165,7 @@ export class AppStore {
     const session: Session = {
       ...input,
       auth,
+      jumpHosts,
       folderId,
       proxyJump: input.proxyJump ?? null,
       createdAt: existing?.createdAt ?? input.createdAt ?? now,

@@ -2349,6 +2349,45 @@ body.resizing-sidebar {
   font-size: 11.5px;
 }
 
+/* Jump host editor in the session dialog */
+.jump-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 6px;
+}
+
+.jump-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.jump-card {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+
+.jump-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.jump-card .form-grid {
+  gap: 8px 12px;
+}
+
+.jump-card .form-hint {
+  margin-top: 6px;
+}
+
 /* Rule editors in the session dialog */
 .rule-list {
   display: flex;

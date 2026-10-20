@@ -9,6 +9,14 @@ export const authSchema = z.object({
   savePassword: z.boolean().optional()
 })
 
+export const jumpHostSchema = z.object({
+  id: z.string().min(1).max(128),
+  host: z.string().min(1).max(255),
+  port: z.number().int().min(1).max(65535),
+  username: z.string().max(255),
+  auth: authSchema.optional()
+})
+
 export const terminalOptionsSchema = z.object({
   term: z.string().min(1).max(64).default('xterm-256color'),
   theme: z.enum(['dark', 'light', 'solarized']).default('dark'),
@@ -69,6 +77,7 @@ export const sessionSchema = z.object({
   connectionType: z.enum(['ssh', 'serial']).optional(),
   serial: serialOptionsSchema.optional(),
   proxyJump: z.string().max(1024).nullable().optional(),
+  jumpHosts: z.array(jumpHostSchema).max(8).optional(),
   quickCommands: z.array(quickCommandSchema).max(100).optional(),
   triggers: z.array(triggerRuleSchema).max(100).optional(),
   highlights: z.array(highlightRuleSchema).max(100).optional(),
@@ -102,8 +111,13 @@ export const connectRequestSchema = z.object({
 /** Auth data allowed in an exported bundle: never include passwords. */
 export const exportedAuthSchema = authSchema.omit({ password: true, savePassword: true })
 
+export const exportedJumpHostSchema = jumpHostSchema.extend({
+  auth: exportedAuthSchema.optional()
+})
+
 export const exportedSessionSchema = sessionSchema.extend({
-  auth: exportedAuthSchema
+  auth: exportedAuthSchema,
+  jumpHosts: z.array(exportedJumpHostSchema).max(8).optional()
 })
 
 export const EXPORT_FORMAT = 'hshell-sessions'

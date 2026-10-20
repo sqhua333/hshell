@@ -161,7 +161,6 @@ node_modules/electron/dist/electron --version   # 有显示环境时
         sftp-service.ts         # 列表/CRUD/传输/进度/取消
         forward-service.ts      # -L / -R
         socks5-server.ts        # -D
-        jump.ts                 # ProxyJump 链
         key-service.ts          # 密钥生成/导入/指纹/安装
         known-hosts.ts          # TOFU + OpenSSH known_hosts
       serial/
@@ -176,6 +175,7 @@ node_modules/electron/dist/electron --version   # 有显示环境时
       index.ts                  # contextBridge 唯一暴露面
     shared/
       types.ts                  # 领域类型
+      jump.ts                   # ProxyJump 链解析/格式化（主进程与界面共用）
       session.ts                # 串口/SSH 会话的显示辅助函数
       ipc-contract.ts           # 通道名与请求/响应类型
       schemas.ts                # zod schema
@@ -425,8 +425,9 @@ npm run dist:linux -- --dir     # 或 npx electron-builder --linux --dir
 ### P7 跳板机
 
 任务：
-- 逐跳 `forwardOut` 作为下一跳 `sock`；每跳独立认证与 host key 校验。
-- `ProxyJump` 解析；失败时回收中间连接。
+- 逐跳 `forwardOut` 作为下一跳 `sock`；每跳独立认证与 host key 校验，并支持每跳
+  独立的用户名与密码/密钥（结构化 `jumpHosts`）。
+- `ProxyJump` 解析与兼容；失败时回收中间连接。
 
 验收：localhost 两跳连接成功；第二跳失败时第一跳被关闭；解析器单测通过。
 
@@ -663,10 +664,13 @@ mac:
 - **端口转发**：本地 `-L`、远程 `-R`、动态 `-D`（内置 SOCKS5 CONNECT，支持 IPv4、
   域名与 IPv6）。工具栏 / 菜单打开管理对话框，可查看运行状态、停止规则；端口占用等
   错误有明确提示，会话断开、认证失败或重连时自动注销远端监听并销毁本地监听器与通道。
-- **跳板机（ProxyJump）**：支持 `[user@]host[:port]` 与逗号分隔多跳、IPv6 方括号
-  写法；逐跳建立 `forwardOut` 通道作为下一跳的 `sock`，每跳独立完成认证与主机密钥
-  校验。会话属性可直接填写，或从 `~/.ssh/config` 导入。任一跳失败会关闭已建立的
-  跳板连接；重连时整条链重建，断开时全部回收。
+- **跳板机（ProxyJump）**：会话属性中以列表逐跳配置主机、端口、用户名与认证方式
+  （密码 / 私钥 / agent / 键盘交互 / 与主机会话相同），因此跳板机与目标机可使用完全
+  不同的账号和密码；最多 8 跳。仍兼容 `[user@]host[:port]` 与逗号分隔的 ProxyJump
+  字符串及 `~/.ssh/config` 导入。逐跳建立 `forwardOut` 通道作为下一跳的 `sock`，
+  每跳独立认证与主机密钥校验。每跳的保存密码使用独立的加密凭据条目，不会写入
+  `sessions.json`。任一跳失败会关闭已建立的跳板连接；重连时整条链重建，断开时
+  全部回收。
 - **分屏 / 查找 / 主题**：水平与垂直分屏、xterm 查找、深浅主题、字号调整。分屏按
   标签独立，布局是一棵可嵌套的 split 树：再次分屏只把**当前活动面板**的份额对半分
   （例如 50/50 → 50/25/25，即新面板占 1/4、原面板仍占 1/2），其他面板尺寸不变；
@@ -755,7 +759,7 @@ mac:
   用户目录运行。NSIS 安装包在 Linux 上交叉构建需要 wine32（electron-builder
   需运行 32 位安装器生成卸载程序，本机未安装），macOS 产物需要 macOS 主机，二者由
   `.github/workflows/build.yml` 在 CI 中构建。
-- **验证**：`npm run typecheck` 通过；默认 214 个测试通过（189 个单元 + 25 个集成
+- **验证**：`npm run typecheck` 通过；默认 222 个测试通过（195 个单元 + 27 个集成
   测试；覆盖迁移、导出导入往返、文件夹环、ssh config、ZMODEM 双向协议、串口 ANSI
   颜色透传、断线自动
   重连、重连预算耗尽后自动断开、主机明确断开时不重连、认证失败不重试、
@@ -769,7 +773,8 @@ mac:
   布局树构建恢复与旧平面格式兼容/损坏回退、i18n 切换、串口参数
   规范化与 socat 虚拟串口双向收发 / 日志 / ZMODEM / 错误提示、输出规则引擎与
   跨块匹配/冷却、录制器与回放脚本语法、配色方案解析、自动化 schema、
-  启动诊断文案与 ACL 修复命令、会话管理器宽度夹取）。另有 5 个默认跳过
+  启动诊断文案与 ACL 修复命令、会话管理器宽度夹取、跳板机逐跳凭据恢复与
+  密码落盘/导出脱敏）。另有 5 个默认跳过
   的浸泡测试，用 `HSHELL_SOAK=1` /
   `HSHELL_SOAK_FULL=1` 开启（20 会话 ×3 轮、16MB 背压、并发连接风暴、30 次连接
   循环、100MB SFTP 往返），均已在本机通过。`npm run build` 通过；打包后的
@@ -871,14 +876,18 @@ mac:
   认证失败或重连时自动注销全部规则。错误统一映射为中文提示（EADDRINUSE 等）。
   集成测试用内存 SSH 服务器 + 本地 HTTP/回显服务验证三条链路、停止后端口释放
   以及端口占用错误。
-- P7 完成：`ssh/jump.ts` 解析 OpenSSH `ProxyJump`（`[user@]host[:port]`、逗号分隔
-  多跳、IPv6 方括号、`none`，最多 8 跳，拒绝空格/控制字符/非法端口）。管理器在
-  `open()` 中按链逐跳建立连接，上一跳的 `forwardOut` 流作为下一跳的 `sock`；每跳
-  使用相同的认证配置但独立执行主机密钥 TOFU 校验（提示中显示跳板机地址）。最终
-  shell 仍建立在目标主机上。任何一跳失败都会调用 `closeJump()` 回收已建立的连接
-  与通道；自动重连会重建整条链。会话属性新增 ProxyJump 输入框，`~/.ssh/config`
-  导入逻辑此前已写入该字段。单测覆盖解析与格式往返；集成测试验证两跳登录、目标
-  认证失败时不重试且跳板连接被关闭、非法配置快速失败。
+- P7 完成：`shared/jump.ts` 解析 OpenSSH `ProxyJump`（`[user@]host[:port]`、逗号分隔
+  多跳、IPv6 方括号、`none`，最多 8 跳，拒绝空格/控制字符/非法端口）。会话保存
+  结构化的 `jumpHosts`（主机、端口、用户名、可选 `auth`），管理器优先使用它；每跳
+  可配置独立密码、私钥、agent 或键盘交互，未配置 `auth` 时回退到会话认证。客户端
+  渲染层将列表同步为 `proxyJump` 字符串，旧数据与 `~/.ssh/config` 导入仍可直接使用。
+  管理器按链逐跳建立连接，上一跳的 `forwardOut` 流作为下一跳的 `sock`；每跳独立
+  执行主机密钥 TOFU 校验（键盘交互提示中显示跳板机地址）。最终 shell 仍建立在目标
+  主机上。任何一跳失败都会调用 `closeJump()` 回收已建立的连接与通道；自动重连会
+  重建整条链。跳板机密码按 `jump:<sessionId>:<jumpId>` 单独加密保存，连接时由主
+  进程按跳恢复，落盘与导出均脱敏。单测覆盖解析与格式往返、逐跳凭据恢复与脱敏；
+  集成测试验证两跳使用不同账号密码、错误跳板密码止步于该跳、目标认证失败时不重试
+  且跳板连接被关闭、非法配置快速失败。
 - P10 完成（除 24h 实跑）：新增 `tests/integration/soak.test.ts`（`HSHELL_SOAK=1`）
   与 sftp-transfer 中的 100MB 用例（`HSHELL_SOAK_FULL=1`）。测试直接读取
   `SshManager` 的私有运行表确认关闭后清空，并通过内存 SSH 服务器的连接集合判断

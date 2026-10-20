@@ -52,7 +52,11 @@ interface FakeServer {
   close(): Promise<void>
 }
 
-async function startServer(options: { forwarding: boolean; acceptAuth?: boolean }): Promise<FakeServer> {
+async function startServer(options: {
+  forwarding: boolean
+  acceptAuth?: boolean
+  credentials?: { username: string; password: string }
+}): Promise<FakeServer> {
   const { private: hostKey } = utils.generateKeyPairSync('rsa', { bits: 2048 })
   const connections = new Set<Connection>()
   const acceptAuth = options.acceptAuth ?? true
@@ -60,6 +64,18 @@ async function startServer(options: { forwarding: boolean; acceptAuth?: boolean 
     connections.add(connection)
     connection.on('close', () => connections.delete(connection))
     connection.on('authentication', (ctx) => {
+      if (options.credentials) {
+        if (
+          ctx.method === 'password' &&
+          ctx.username === options.credentials.username &&
+          ctx.password === options.credentials.password
+        ) {
+          ctx.accept()
+        } else {
+          ctx.reject(['password'])
+        }
+        return
+      }
       if (acceptAuth) ctx.accept()
       else ctx.reject(['password'])
     })
@@ -150,6 +166,83 @@ describe('ProxyJump', () => {
     expect(statuses).not.toContain('failed')
     expect(hop.connections.size).toBe(1)
     expect(final.connections.size).toBe(1)
+  }, 30_000)
+
+  it('uses per-hop credentials that differ from the target', async () => {
+    const final = await startServer({
+      forwarding: false,
+      credentials: { username: 'target-user', password: 'target-secret' }
+    })
+    const hop = await startServer({
+      forwarding: true,
+      credentials: { username: 'jump-user', password: 'jump-secret' }
+    })
+    const { manager, statuses, output } = setup()
+    cleanup.push(() => final.close())
+    cleanup.push(() => hop.close())
+    cleanup.push(() => manager.disconnect(RUNTIME))
+
+    const session = baseSession(final.port, null)
+    session.username = 'target-user'
+    session.auth = { method: 'password', password: 'target-secret' }
+    session.jumpHosts = [
+      {
+        id: 'jump-1',
+        host: '127.0.0.1',
+        port: hop.port,
+        username: 'jump-user',
+        auth: { method: 'password', password: 'jump-secret' }
+      }
+    ]
+
+    await manager.connect({ runtimeId: RUNTIME, session, cols: 80, rows: 24 })
+
+    await waitFor(() => statuses.includes('connected'))
+    await waitFor(() => output.join('').includes('shell-ready'))
+    expect(statuses).not.toContain('failed')
+    expect(hop.connections.size).toBe(1)
+    expect(final.connections.size).toBe(1)
+  }, 30_000)
+
+  it('fails at the hop when its own password is wrong', async () => {
+    const final = await startServer({
+      forwarding: false,
+      credentials: { username: 'target-user', password: 'target-secret' }
+    })
+    const hop = await startServer({
+      forwarding: true,
+      credentials: { username: 'jump-user', password: 'jump-secret' }
+    })
+    const { manager, statuses, events } = setup()
+    cleanup.push(() => final.close())
+    cleanup.push(() => hop.close())
+    cleanup.push(() => manager.disconnect(RUNTIME))
+
+    const session = baseSession(final.port, null)
+    session.username = 'target-user'
+    session.auth = { method: 'password', password: 'target-secret' }
+    session.jumpHosts = [
+      {
+        id: 'jump-1',
+        host: '127.0.0.1',
+        port: hop.port,
+        username: 'jump-user',
+        auth: { method: 'password', password: 'wrong-secret' }
+      }
+    ]
+
+    await manager.connect({ runtimeId: RUNTIME, session, cols: 80, rows: 24 })
+
+    await waitFor(() => statuses.includes('failed'))
+    expect(
+      events.some(
+        (event) =>
+          event.type === 'ssh:status' &&
+          event.status === 'failed' &&
+          /跳板机/.test(event.message ?? '')
+      )
+    ).toBe(true)
+    expect(final.connections.size).toBe(0)
   }, 30_000)
 
   it('tears down the jump hop when the target rejects authentication', async () => {
