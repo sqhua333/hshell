@@ -245,17 +245,13 @@ export class ZmodemController {
     const total = typeof details.size === 'number' ? details.size : 0
     let transferred = 0
     let lastReport = 0
+    let writeError: Error | null = null
     const stream = createWriteStream(target, { mode: 0o600, flags: 'wx' })
+    // Keep the protocol running (the sender must not stall) but remember the
+    // failure so the transfer is reported as failed instead of completed.
     stream.on('error', (error) => {
-      if (!this.flow.errored) {
-        this.flow.errored = true
-        this.callbacks.status({
-          phase: 'error',
-          direction: 'download',
-          fileName: basename(target),
-          message: `写入文件失败：${error.message}`
-        })
-      }
+      writeError = error
+      this.flow.errored = true
     })
 
     this.callbacks.status({
@@ -270,7 +266,7 @@ export class ZmodemController {
       const done = offer.accept({
         on_input: (chunk) => {
           const buffer = Buffer.from(chunk)
-          stream.write(buffer)
+          if (!writeError) stream.write(buffer)
           transferred += buffer.length
           const now = Date.now()
           if (now - lastReport >= PROGRESS_INTERVAL_MS) {
@@ -286,7 +282,15 @@ export class ZmodemController {
         }
       })
       await done
-      await new Promise<void>((resolve) => stream.end(() => resolve()))
+      await new Promise<void>((resolve) => {
+        if (writeError) {
+          resolve()
+          return
+        }
+        stream.once('close', () => resolve())
+        stream.end(() => resolve())
+      })
+      if (writeError) throw writeError
       this.callbacks.status({
         phase: 'file-complete',
         direction: 'download',
@@ -346,6 +350,9 @@ export class ZmodemController {
         .filter((file) => file.size >= 0)
 
       let bytesRemaining = files.reduce((sum, file) => sum + file.size, 0)
+      // ZSKIP resolves send_offer() without a transfer; that is how `rz`
+      // reports a file it cannot create (read-only directory, no space, ...).
+      const skipped: string[] = []
       for (let index = 0; index < files.length; index += 1) {
         if (this.disposed || this.flow.cancelled) return
         const file = files[index]
@@ -358,12 +365,23 @@ export class ZmodemController {
         }
         const transfer = await session.send_offer(details)
         if (transfer) await this.sendFile(transfer, file)
+        else skipped.push(file.name)
         bytesRemaining -= file.size
       }
 
       if (!this.disposed && !this.flow.cancelled) {
         await session.close()
-        this.callbacks.status({ phase: 'complete', direction: 'upload' })
+        if (skipped.length > 0) {
+          this.flow.errored = true
+          this.callbacks.status({
+            phase: 'error',
+            direction: 'upload',
+            fileName: skipped.join(', '),
+            message: `远端拒绝接收：${skipped.join('、')}（目录不可写或空间不足）`
+          })
+        } else {
+          this.callbacks.status({ phase: 'complete', direction: 'upload' })
+        }
       }
     } catch (error) {
       this.fail(session, 'upload', error)

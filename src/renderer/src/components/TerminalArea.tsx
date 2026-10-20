@@ -30,6 +30,7 @@ import { Icon } from './Icon'
 import { SessionDock } from './SessionDock'
 import { TabBar } from './TabBar'
 import { TerminalPane } from './TerminalPane'
+import { ZmodemProgress } from './ZmodemProgress'
 
 function Welcome(): ReactElement {
   const sessions = useApp((state) => state.sessions)
@@ -454,6 +455,8 @@ export function TerminalArea(): ReactElement {
           ))}
         </div>
       )}
+
+      <ZmodemProgress />
 
       {searchVisible && tabs.length > 0 ? (
         <div className="terminal-search">

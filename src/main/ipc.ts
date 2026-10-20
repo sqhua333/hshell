@@ -53,6 +53,19 @@ function assertAbsolute(path: string): string {
   return resolve(path)
 }
 
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+/** Desktop when it exists, otherwise the home directory. */
+function localStartDir(): string {
+  return resolveStartDir(os.homedir(), isDirectory)
+}
+
 function optionalPassword(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 && value.length <= 1024
     ? value
@@ -133,6 +146,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
       if (!win) return null
       const result = await dialog.showOpenDialog(win, {
         title: suggestedName ? `保存 ${suggestedName} 到目录` : '选择接收文件的保存目录',
+        defaultPath: localStartDir(),
         properties: ['openDirectory', 'createDirectory', 'showHiddenFiles']
       })
       return result.canceled ? null : result.filePaths[0] ?? null
@@ -142,6 +156,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
       if (!win) return null
       const result = await dialog.showOpenDialog(win, {
         title: '选择要发送到远程的文件（rz）',
+        defaultPath: localStartDir(),
         properties: ['openFile', 'multiSelections', 'showHiddenFiles']
       })
       return result.canceled ? null : result.filePaths
@@ -423,15 +438,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   handle('layouts:save', (input: unknown) => layouts.save(windowLayoutSchema.parse(input)))
 
   handle('fs:home', () => os.homedir())
-  handle('fs:startDir', () =>
-    resolveStartDir(os.homedir(), (path) => {
-      try {
-        return statSync(path).isDirectory()
-      } catch {
-        return false
-      }
-    })
-  )
+  handle('fs:startDir', () => localStartDir())
   handle('fs:list', (path: string) => localList(String(path)))
   handle('fs:mkdir', (path: string) => {
     mkdirSync(assertAbsolute(path))

@@ -134,6 +134,81 @@ describe('ZmodemController transfers', () => {
     expect(Buffer.concat(received).equals(payload)).toBe(true)
   }, 15_000)
 
+  it('reports an error when the remote receiver skips the file', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hshell-zmodem-skip-'))
+    const file = join(dir, 'rejected.bin')
+    writeFileSync(file, Buffer.from('payload'))
+
+    const statuses: ZmodemStatus[] = []
+    let peer: ZmodemSession | undefined
+    const controller = new ZmodemController({
+      writeRemote: (data) => peer?.consume(Array.from(data)),
+      writeTerminal: () => undefined,
+      status: (update) => statuses.push(update),
+      host: {
+        pickDownloadDirectory: async () => null,
+        pickUploadFiles: async () => [file]
+      }
+    })
+
+    peer = Zmodem.Session.parse(Array.from(hexHeader('ZRQINIT')))
+    peer!.on('offer', (offer) => offer.skip())
+    peer!.set_sender((octets) => controller.feed(Buffer.from(octets)))
+    void peer!.start()
+
+    await waitFor(() => statuses.some((update) => update.phase === 'error'))
+    const error = statuses.find((update) => update.phase === 'error')
+    expect(error).toMatchObject({ direction: 'upload', fileName: 'rejected.bin' })
+    expect(error?.message).toContain('远端拒绝接收')
+    expect(statuses.some((update) => update.phase === 'complete')).toBe(false)
+  }, 15_000)
+
+  it('reports an error instead of completing when the local write fails', async () => {
+    const missingDir = join(tmpdir(), `hshell-zmodem-missing-${Date.now()}`)
+    const payload = Buffer.from('data that cannot be written\n'.repeat(100))
+    const statuses: ZmodemStatus[] = []
+
+    let peer: ZmodemSession | undefined
+    let skippedInitialZrinit = false
+    const controller = new ZmodemController({
+      writeRemote: (data) => {
+        const bytes = Buffer.from(data)
+        const zrinitPrefix = Buffer.from([0x2a, 0x2a, 0x18, 0x42, 0x30, 0x31])
+        if (!skippedInitialZrinit && bytes.subarray(0, 6).equals(zrinitPrefix)) {
+          skippedInitialZrinit = true
+          return
+        }
+        peer?.consume(Array.from(bytes))
+      },
+      writeTerminal: () => undefined,
+      status: (update) => statuses.push(update),
+      host: {
+        pickDownloadDirectory: async () => missingDir,
+        pickUploadFiles: async () => null
+      }
+    })
+
+    peer = Zmodem.Session.parse(Array.from(hexHeader('ZRINIT')))
+    peer!.set_sender((octets) => controller.feed(Buffer.from(octets)))
+    controller.feed(hexHeader('ZRQINIT'))
+    await waitFor(() => statuses.some((update) => update.phase === 'detected'))
+
+    const transfer = await peer!.send_offer({
+      name: 'blocked.txt',
+      size: payload.length,
+      mtime: new Date(),
+      files_remaining: 1,
+      bytes_remaining: payload.length
+    })
+    await transfer!.end(new Uint8Array(payload))
+
+    await waitFor(() => statuses.some((update) => update.phase === 'error'))
+    const error = statuses.find((update) => update.phase === 'error')
+    expect(error).toMatchObject({ direction: 'download', fileName: 'blocked.txt' })
+    expect(error?.message).toContain('接收失败')
+    expect(statuses.some((update) => update.phase === 'file-complete')).toBe(false)
+  }, 15_000)
+
   it('receives a file offered by a ZMODEM sender', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hshell-zmodem-down-'))
     const payload = Buffer.from('hello from the remote side\n'.repeat(2000))
