@@ -18,6 +18,12 @@ const MAX_HEADER_BYTES = 32
 const SEND_HIGH_WATER = 4 * 1024 * 1024
 const CHUNK_SIZE = 64 * 1024
 const PROGRESS_INTERVAL_MS = 200
+/**
+ * How long to wait for the peer's ZFIN before aborting. lrzsz can otherwise
+ * leave the session open for many seconds, during which the controller keeps
+ * consuming terminal output and the shell appears frozen.
+ */
+const CLOSE_TIMEOUT_MS = 2000
 
 export type ZmodemPhase =
   | 'detected'
@@ -66,6 +72,23 @@ function errorMessage(error: unknown): string {
   return String(error)
 }
 
+/** Resolution/rejection bound so a silent peer cannot wedge the controller. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolvePromise, reject) => {
+    const timer = setTimeout(() => reject(new Error('ZMODEM 对端无响应')), ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolvePromise(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      }
+    )
+  })
+}
+
 /**
  * Intercepts a PTY stream and handles ZMODEM transfers initiated by `sz`/`rz`
  * on the remote host.
@@ -77,6 +100,8 @@ export class ZmodemController {
   private held = Buffer.alloc(0)
   private session: ZmodemSession | null = null
   private disposed = false
+  /** Swallow the XON/XOFF that follows a dropped control header. */
+  private swallowFlowControl = false
   private flow: FlowState = { cancelled: false, errored: false }
 
   constructor(private readonly callbacks: ZmodemCallbacks) {}
@@ -117,6 +142,10 @@ export class ZmodemController {
 
   private scan(data: Buffer): void {
     let pos = 0
+    if (this.swallowFlowControl) {
+      while (pos < data.length && isFlowControl(data[pos])) pos += 1
+      this.swallowFlowControl = false
+    }
     for (;;) {
       const index = data.indexOf(ZMODEM_MARKER, pos)
       if (index < 0) {
@@ -151,6 +180,16 @@ export class ZmodemController {
       }
 
       if (!session) {
+        // A well-formed header that does not start a session (ZSKIP, ZFIN,
+        // ZABORT reactions, ...) is leftover protocol noise from a just-ended
+        // transfer. Drop it instead of drawing its control bytes.
+        if (parsesAsHeader(candidate.subarray(0, lfPos + 1))) {
+          if (index > pos) this.callbacks.writeTerminal(data.subarray(pos, index))
+          pos = index + lfPos + 1
+          while (pos < data.length && isFlowControl(data[pos])) pos += 1
+          if (pos >= data.length) this.swallowFlowControl = true
+          continue
+        }
         this.callbacks.writeTerminal(data.subarray(pos, index + 1))
         pos = index + 1
         continue
@@ -197,7 +236,7 @@ export class ZmodemController {
         this.skip(offer)
         return
       }
-      if (directory) void this.acceptOffer(offer, directory)
+      if (directory) void this.acceptOffer(session, offer, directory)
       else queued.push(offer)
     })
 
@@ -222,13 +261,17 @@ export class ZmodemController {
       }
 
       directory = selected
-      queued.splice(0).forEach((offer) => void this.acceptOffer(offer, selected))
+      queued.splice(0).forEach((offer) => void this.acceptOffer(session, offer, selected))
     } catch (error) {
       this.fail(session, 'download', error)
     }
   }
 
-  private async acceptOffer(offer: ZmodemOffer, directory: string): Promise<void> {
+  private async acceptOffer(
+    session: ZmodemSession,
+    offer: ZmodemOffer,
+    directory: string
+  ): Promise<void> {
     const details = offer.get_details()
     const name = sanitizeFileName(details.name)
     if (!name) {
@@ -305,6 +348,9 @@ export class ZmodemController {
       } catch {
         /* ignore */
       }
+      // Stop the peer now; otherwise `sz` may keep the session open for
+      // several seconds and terminal output stays trapped in the controller.
+      this.abort(session)
       this.callbacks.status({
         phase: 'error',
         direction: 'download',
@@ -370,8 +416,10 @@ export class ZmodemController {
       }
 
       if (!this.disposed && !this.flow.cancelled) {
-        await session.close()
         if (skipped.length > 0) {
+          // `rz` refused at least one file. Abort instead of waiting for the
+          // ZFIN handshake, so the shell becomes usable again immediately.
+          this.abort(session)
           this.flow.errored = true
           this.callbacks.status({
             phase: 'error',
@@ -380,6 +428,11 @@ export class ZmodemController {
             message: `远端拒绝接收：${skipped.join('、')}（目录不可写或空间不足）`
           })
         } else {
+          try {
+            await withTimeout(session.close(), CLOSE_TIMEOUT_MS)
+          } catch {
+            this.abort(session)
+          }
           this.callbacks.status({ phase: 'complete', direction: 'upload' })
         }
       }
@@ -468,6 +521,19 @@ export class ZmodemController {
       message: `ZMODEM 传输失败：${errorMessage(error)}`
     })
     this.abort(session)
+  }
+}
+
+function isFlowControl(octet: number): boolean {
+  return octet === 0x11 || octet === 0x13
+}
+
+function parsesAsHeader(octets: Buffer): boolean {
+  try {
+    const header = Zmodem.Header.parse_hex(Array.from(octets))
+    return Boolean(header?.NAME)
+  } catch {
+    return false
   }
 }
 

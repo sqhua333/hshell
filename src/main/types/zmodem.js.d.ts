@@ -53,6 +53,7 @@ declare module 'zmodem.js' {
     }
     Header: {
       build(name: string, ...args: unknown[]): ZmodemHeader
+      parse_hex(octets: number[]): { NAME: string } | undefined
     }
   }
 

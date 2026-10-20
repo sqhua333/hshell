@@ -212,7 +212,7 @@ node_modules/electron/dist/electron --version   # 有显示环境时
 - **认证顺序**：agent（`SSH_AUTH_SOCK`）→ 私钥 → 密码 → keyboard-interactive。`keyboard-interactive` 支持多轮，prompt 的 `echo` 决定是否掩码。
 - **重连**：状态机 `connecting → authenticating → connected → reconnecting → failed`；每次尝试递增 `epoch`，过期回调全部丢弃。仅传输层异常断开重试（1s→30s 指数退避 + 抖动）；认证失败、host key 不匹配不重试。重连后重建 shell/SFTP/隧道并发送当前终端尺寸，保留 xterm 缓冲。
 - **Host key（TOFU）**：不设 `hostHash`，在 `hostVerifier(keyBuffer, cb)` 中解析算法并计算 `SHA256:` 指纹；未知主机弹窗确认，不匹配则硬失败（需先删除记录）。弹窗超时 30s 自动拒绝。已知主机来源：应用内 `known_hosts.json` + `~/.ssh/known_hosts`（首版跳过 hashed 条目并提示）。
-- **ZMODEM（rz/sz）**：主进程在 shell 输出流中识别 `**\x18B0` 的 ZRQINIT/ZRINIT 头（允许跨 chunk 分片），确认前仅暂存可能的协议前缀，绝不把协议字节写进 xterm；命中后由 `zmodem.js` 会话接管。`sz`（下载）先选择目录，远端文件名经消毒后以 0600 独占写入；`rz`（上传）支持多选文件。进度经 `zmodem:status` 事件驱动终端右下角的浮动进度条（方向、文件名、字节数、百分比）并在状态栏同步显示；本地写入失败与远端 `rz` 返回 ZSKIP（目录只读/空间不足）都会上报错误，支持取消与错误提示。
+- **ZMODEM（rz/sz）**：主进程在 shell 输出流中识别 `**\x18B0` 的 ZRQINIT/ZRINIT 头（允许跨 chunk 分片），确认前仅暂存可能的协议前缀，绝不把协议字节写进 xterm；命中后由 `zmodem.js` 会话接管。`sz`（下载）先选择目录，远端文件名经消毒后以 0600 独占写入；`rz`（上传）支持多选文件。进度经 `zmodem:status` 事件驱动终端右下角的浮动进度条（方向、文件名、字节数、百分比）并在状态栏同步显示；本地写入失败与远端 `rz` 返回 ZSKIP（目录只读/空间不足）都会上报错误并立即中止会话；成功结束时等待 ZFIN 最多 2 秒，超时即 abort，避免终端被协议会话占用数秒，残留控制帧会被丢弃而不回显。支持取消与错误提示。
 - **串口会话**：`Session.connectionType = 'serial'` 时复用同一套 runtime/IPC（`ssh:connect|write|ack|disconnect`），由 `main/serial/manager.ts` 驱动 `serialport`。设备路径去掉首尾空白并拒绝控制字符，波特率 50–4,000,000 的整数，数据位 5/6/7/8，停止位 1/1.5/2，校验 none/even/odd/mark/space，流控 none/rtscts/xonxoff。打开后按配置设置 DTR/RTS（PTY 等不支持时忽略失败）。数据流复用 8ms 批量、2MB/512KB ack 背压、`SessionLogger` 与 `ZmodemController`；串口没有窗口尺寸，`resize` 为空操作。SFTP、端口转发、公钥安装对串口会话禁用。
 - **资源释放**：关闭 tab/窗口时销毁 xterm、搜索/WebGL addon、日志流、监听器、定时器。
 
@@ -766,7 +766,7 @@ mac:
   用户目录运行。NSIS 安装包在 Linux 上交叉构建需要 wine32（electron-builder
   需运行 32 位安装器生成卸载程序，本机未安装），macOS 产物需要 macOS 主机，二者由
   `.github/workflows/build.yml` 在 CI 中构建。
-- **验证**：`npm run typecheck` 通过；默认 240 个测试通过（213 个单元 + 27 个集成
+- **验证**：`npm run typecheck` 通过；默认 241 个测试通过（214 个单元 + 27 个集成
   测试；覆盖迁移、导出导入往返、文件夹环、ssh config、ZMODEM 双向协议与
   远端跳过/本地写入失败、串口 ANSI
   颜色透传、断线自动

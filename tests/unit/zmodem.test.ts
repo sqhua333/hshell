@@ -6,11 +6,11 @@ import Zmodem from 'zmodem.js'
 import type { ZmodemSession } from 'zmodem.js'
 import { ZmodemController, type ZmodemStatus } from '../../src/main/ssh/zmodem'
 
-function hexHeader(name: 'ZRQINIT' | 'ZRINIT'): Buffer {
+function hexHeader(name: 'ZRQINIT' | 'ZRINIT' | 'ZSKIP'): Buffer {
   const header =
     name === 'ZRINIT'
       ? Zmodem.Header.build('ZRINIT', ['CANFDX', 'CANOVIO', 'CANBRK'], 0)
-      : Zmodem.Header.build('ZRQINIT')
+      : Zmodem.Header.build(name)
   return Buffer.from(header.to_hex())
 }
 
@@ -79,6 +79,22 @@ describe('ZmodemController detection', () => {
 
     expect(Buffer.concat(terminal).toString()).toBe('line\n')
     expect(statuses[0]).toMatchObject({ phase: 'detected', direction: 'download' })
+  })
+
+  it('drops stray control headers left over from a finished session', () => {
+    const terminal: Buffer[] = []
+    const controller = new ZmodemController({
+      writeRemote: () => undefined,
+      writeTerminal: (data) => terminal.push(Buffer.from(data)),
+      status: () => undefined,
+      host: {
+        pickDownloadDirectory: async () => null,
+        pickUploadFiles: async () => null
+      }
+    })
+    controller.feed(Buffer.concat([Buffer.from('prompt$ '), hexHeader('ZSKIP')]))
+    controller.feed(hexHeader('ZSKIP'))
+    expect(Buffer.concat(terminal).toString()).toBe('prompt$ ')
   })
 
   it('does not swallow a text line that merely resembles a header', () => {
