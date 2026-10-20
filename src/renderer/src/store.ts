@@ -3,6 +3,7 @@ import type {
   Folder,
   HostKeyPrompt,
   KeyboardPrompt,
+  QuickCommand,
   RuntimeStatus,
   Session,
   SftpProgressEvent,
@@ -27,8 +28,15 @@ import {
   type PaneState,
   type SplitSide
 } from './lib/pane-layout'
+import {
+  mergeQuickCommands,
+  normalizeQuickCommands,
+  parseStoredQuickCommands
+} from './lib/quick-commands'
 import { generateReplayScript, recorder, replayFileName } from './lib/recorder'
 import { clampSidebarWidth, SIDEBAR_DEFAULT_PX } from './lib/sidebar-width'
+
+const QUICK_COMMANDS_KEY = 'hshell.quickCommands'
 
 export type { LayoutNode, PaneNode, PaneState, SplitNode } from './lib/pane-layout'
 
@@ -102,6 +110,9 @@ interface AppState {
   searchFocusNonce: number
   uiTheme: 'light' | 'dark'
   fontSize: number
+  /** Global quick-command buttons shared by every session. */
+  quickCommands: QuickCommand[]
+  quickCommandsOpen: boolean
   quickBarAutoHide: boolean
   composeOpen: boolean
   composeFocusNonce: number
@@ -195,6 +206,8 @@ interface AppState {
   setAboutOpen(open: boolean): void
   setKeysOpen(open: boolean): void
   setTunnelsOpen(open: boolean): void
+  saveQuickCommands(list: QuickCommand[]): void
+  setQuickCommandsOpen(open: boolean): void
 }
 
 function uid(prefix: string): string {
@@ -245,6 +258,22 @@ function readSidebarWidth(): number {
     return Number.isFinite(value) && value > 0 ? clampSidebarWidth(value) : SIDEBAR_DEFAULT_PX
   } catch {
     return SIDEBAR_DEFAULT_PX
+  }
+}
+
+function readQuickCommands(): QuickCommand[] {
+  try {
+    return parseStoredQuickCommands(localStorage.getItem(QUICK_COMMANDS_KEY)) ?? []
+  } catch {
+    return []
+  }
+}
+
+function writeQuickCommands(list: QuickCommand[]): void {
+  try {
+    localStorage.setItem(QUICK_COMMANDS_KEY, JSON.stringify(list))
+  } catch {
+    /* quick commands are best-effort UI state */
   }
 }
 
@@ -313,6 +342,8 @@ export const useApp = create<AppState>((set, get) => ({
   searchFocusNonce: 0,
   uiTheme: readTheme(),
   fontSize: readFontSize(),
+  quickCommands: readQuickCommands(),
+  quickCommandsOpen: false,
   quickBarAutoHide: readFlag('hshell.quickBarAutoHide', false),
   composeOpen: false,
   composeFocusNonce: 0,
@@ -359,8 +390,22 @@ export const useApp = create<AppState>((set, get) => ({
     for (const tab of tabs) {
       for (const pane of tab.panes) statuses[pane.runtimeId] = { status: 'idle' }
     }
+
+    // Quick commands used to live inside each session. On first launch after
+    // the upgrade, adopt them into the global list instead of dropping them.
+    let quickCommands = get().quickCommands
+    try {
+      if (localStorage.getItem(QUICK_COMMANDS_KEY) === null) {
+        quickCommands = mergeQuickCommands([], data.sessions)
+        writeQuickCommands(quickCommands)
+      }
+    } catch {
+      /* ignore storage failures */
+    }
+
     set({
       ready: true,
+      quickCommands,
       appVersion: info.version,
       defaultUsername: info.username || 'root',
       folders: data.folders,
@@ -907,5 +952,15 @@ export const useApp = create<AppState>((set, get) => ({
 
   setTunnelsOpen(open) {
     set({ tunnelsOpen: open })
+  },
+
+  saveQuickCommands(list) {
+    const next = normalizeQuickCommands(list)
+    set({ quickCommands: next })
+    writeQuickCommands(next)
+  },
+
+  setQuickCommandsOpen(open) {
+    set({ quickCommandsOpen: open })
   }
 }))

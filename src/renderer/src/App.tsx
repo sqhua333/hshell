@@ -11,6 +11,7 @@ import { FolderDialog } from './components/FolderDialog'
 import { HostKeyDialog } from './components/HostKeyDialog'
 import { KeyboardDialog } from './components/KeyboardDialog'
 import { KeysDialog } from './components/KeysDialog'
+import { QuickCommandsDialog } from './components/QuickCommandsDialog'
 import { SessionDialog } from './components/SessionDialog'
 import { SessionSidebar } from './components/SessionSidebar'
 import { SftpPanel } from './components/SftpPanel'
@@ -185,6 +186,7 @@ export default function App(): ReactElement {
       <StatusBar />
 
       <SessionDialog />
+      <QuickCommandsDialog />
       <KeysDialog />
       <TunnelsDialog />
       <HostKeyDialog />

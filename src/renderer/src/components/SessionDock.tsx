@@ -20,6 +20,8 @@ export function SessionDock({ tab, activeRuntimeId, visible }: SessionDockProps)
   const setComposeOpen = useApp((state) => state.setComposeOpen)
   const toggleCompose = useApp((state) => state.toggleCompose)
   const openSessionDialog = useApp((state) => state.openSessionDialog)
+  const quickCommands = useApp((state) => state.quickCommands)
+  const setQuickCommandsOpen = useApp((state) => state.setQuickCommandsOpen)
   const recordingRuntimeId = useApp((state) => state.recordingRuntimeId)
   const startRecording = useApp((state) => state.startRecording)
   const stopRecording = useApp((state) => state.stopRecording)
@@ -34,7 +36,6 @@ export function SessionDock({ tab, activeRuntimeId, visible }: SessionDockProps)
     tab.panes.find((pane) => pane.runtimeId === activeRuntimeId)?.runtimeId ??
     tab.panes[0]?.runtimeId ??
     null
-  const quickCommands = session.quickCommands ?? []
   const recording = recordingRuntimeId !== null && recordingRuntimeId === runtimeId
 
   useEffect(() => {
@@ -162,8 +163,8 @@ export function SessionDock({ tab, activeRuntimeId, visible }: SessionDockProps)
           )}
           <button
             className="quick-command add"
-            title={tr('管理快速命令', 'Manage quick commands')}
-            onClick={() => openSessionDialog(session, session.folderId, 'automation')}
+            title={tr('管理快速命令（全局）', 'Manage quick commands (global)')}
+            onClick={() => setQuickCommandsOpen(true)}
           >
             <Icon name="plus" size={12} />
             {tr('管理', 'Manage')}

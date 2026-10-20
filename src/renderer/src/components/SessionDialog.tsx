@@ -8,7 +8,6 @@ import type {
   JumpHostConfig,
   KeyMetadata,
   LogFormat,
-  QuickCommand,
   SerialDataBits,
   SerialFlowControl,
   SerialParity,
@@ -154,9 +153,6 @@ function SessionDialogInner({
   const [fontSize, setFontSize] = useState(String(initial?.terminal.fontSize ?? 14))
   const [showTimestamps, setShowTimestamps] = useState(
     initial?.terminal.showTimestamps ?? false
-  )
-  const [quickCommands, setQuickCommands] = useState<QuickCommand[]>(
-    initial?.quickCommands?.map((item) => ({ ...item })) ?? []
   )
   const [triggers, setTriggers] = useState<TriggerRule[]>(
     initial?.triggers?.map((item) => ({ ...item })) ?? []
@@ -372,14 +368,6 @@ function SessionDialogInner({
       }
     }
 
-    const cleanQuick = quickCommands
-      .map((item) => ({ ...item, label: item.label.trim(), command: item.command.trim() }))
-      .filter((item) => item.label && item.command)
-    if (cleanQuick.length !== quickCommands.filter((item) => item.label.trim() || item.command.trim()).length) {
-      setTab('automation')
-      setError(tr('快速命令需要同时填写名称和命令', 'Quick commands need both a label and a command'))
-      return
-    }
     const cleanTriggers = triggers
       .map((item) => ({ ...item, pattern: item.pattern.trim() }))
       .filter((item) => item.pattern)
@@ -467,7 +455,6 @@ function SessionDialogInner({
         colorScheme,
         showTimestamps: showTimestamps || undefined
       },
-      quickCommands: cleanQuick.length ? cleanQuick : undefined,
       triggers: cleanTriggers.length ? cleanTriggers : undefined,
       highlights: cleanHighlights.length ? cleanHighlights : undefined,
       logging: {
@@ -495,8 +482,6 @@ function SessionDialogInner({
   }
 
   const selectedScheme = resolveColorScheme(colorScheme)
-  const updateQuick = (id: string, patch: Partial<QuickCommand>): void =>
-    setQuickCommands((list) => list.map((item) => (item.id === id ? { ...item, ...patch } : item)))
   const updateTrigger = (id: string, patch: Partial<TriggerRule>): void =>
     setTriggers((list) => list.map((item) => (item.id === id ? { ...item, ...patch } : item)))
   const updateHighlight = (id: string, patch: Partial<HighlightRule>): void =>
@@ -1300,64 +1285,6 @@ function SessionDialogInner({
 
           {tab === 'automation' ? (
             <>
-              <div className="section-title">{tr('快速命令', 'Quick commands')}</div>
-              <div className="form-hint">
-                {tr(
-                  '快速命令显示在会话底部的命令栏中，点击即可发送。适合常用的查看、重启与部署命令。',
-                  'Quick commands appear in the bar below the session and send with one click — handy for frequent status, restart and deploy commands.'
-                )}
-              </div>
-              <div className="rule-list">
-                {quickCommands.map((item) => (
-                  <div className="rule-row quick-row" key={item.id}>
-                    <input
-                      className="input"
-                      value={item.label}
-                      onChange={(event) => updateQuick(item.id, { label: event.target.value })}
-                      placeholder={tr('按钮名称', 'Button label')}
-                    />
-                    <input
-                      className="input"
-                      value={item.command}
-                      onChange={(event) => updateQuick(item.id, { command: event.target.value })}
-                      placeholder={tr('要发送的命令', 'Command to send')}
-                      spellCheck={false}
-                    />
-                    <label className="mini-check">
-                      <input
-                        type="checkbox"
-                        checked={item.sendEnter !== false}
-                        onChange={(event) =>
-                          updateQuick(item.id, { sendEnter: event.target.checked })
-                        }
-                      />
-                      {tr('附加回车', 'Enter')}
-                    </label>
-                    <button
-                      className="icon-btn mini danger"
-                      title={tr('删除', 'Delete')}
-                      onClick={() =>
-                        setQuickCommands((list) => list.filter((entry) => entry.id !== item.id))
-                      }
-                    >
-                      <Icon name="trash" size={13} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <button
-                className="btn"
-                onClick={() =>
-                  setQuickCommands((list) => [
-                    ...list,
-                    { id: ruleId('qc'), label: '', command: '', sendEnter: true }
-                  ])
-                }
-              >
-                <Icon name="plus" size={14} />
-                {tr('添加快速命令', 'Add quick command')}
-              </button>
-
               <div className="section-title">{tr('触发器', 'Triggers')}</div>
               <div className="form-hint">
                 {tr(
