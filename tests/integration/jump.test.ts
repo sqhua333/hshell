@@ -260,17 +260,17 @@ describe('ProxyJump', () => {
       rows: 24
     })
 
-    await waitFor(() => statuses.includes('failed'))
-    await waitFor(() => hop.connections.size === 0 && final.connections.size === 0)
-    expect(statuses).not.toContain('reconnecting')
-    expect(
+    // A rejected password is not fatal anymore: the runtime waits for the
+    // terminal prompt while the jump hop is torn down.
+    await waitFor(() =>
       events.some(
         (event) =>
-          event.type === 'ssh:status' &&
-          event.status === 'failed' &&
-          /认证|authentication/i.test(event.message ?? '')
+          event.type === 'ssh:password-request' && event.prompt.attempt === 1
       )
-    ).toBe(true)
+    )
+    await waitFor(() => hop.connections.size === 0 && final.connections.size === 0)
+    expect(statuses).not.toContain('reconnecting')
+    expect(statuses).not.toContain('failed')
     expect(final.connections.size).toBe(0)
   }, 30_000)
 

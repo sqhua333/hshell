@@ -25,6 +25,7 @@
     "smoke:packaged": "node scripts/smoke-packaged.mjs",
     "e2e:drag-split": "node scripts/e2e-drag-split.mjs",
     "e2e:timestamps": "node scripts/e2e-terminal-stamps.mjs",
+    "e2e:password": "node scripts/e2e-password-prompt.mjs",
     "icon": "python3 scripts/gen-icon.py"
   },
   "devDependencies": {

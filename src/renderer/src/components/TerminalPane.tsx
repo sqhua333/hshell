@@ -11,6 +11,7 @@ import { resolveColorScheme } from '../lib/color-schemes'
 import { tr } from '../lib/i18n'
 import { matchShortcut } from '../lib/shortcuts'
 import { findHighlightLines, OutputRuleEngine, stripAnsi } from '../lib/output-rules'
+import { handlePasswordKeys } from '../lib/password-input'
 import { recorder } from '../lib/recorder'
 import { subscribeRuntimeData } from '../lib/runtime-bus'
 import { formatClock } from '../lib/terminal-stamps'
@@ -117,6 +118,9 @@ export function TerminalPane({
   const connectionStatus = status?.status
   const failureDismissed = useApp((state) => state.failedDismissed[runtimeId] ?? false)
   const statusMessage = status?.message
+  const passwordPrompt = useApp((state) => state.passwordPrompt)
+  const passwordPromptRef = useRef(passwordPrompt)
+  passwordPromptRef.current = passwordPrompt
   const previousStatusRef = useRef<string | undefined>(undefined)
   const fontSize = useApp((state) => state.fontSize)
   const setActiveRuntime = useApp((state) => state.setActiveRuntime)
@@ -170,8 +174,40 @@ export function TerminalPane({
     })
 
     const decoder = new TextDecoder()
+    // When password authentication fails the terminal itself asks for the
+    // password; its input must not reach the (already closed) SSH channel.
+    let passwordValue = ''
+    const handlePasswordInput = (data: string): boolean => {
+      const prompt = passwordPromptRef.current
+      if (!prompt || prompt.runtimeId !== runtimeId) return false
+      const result = handlePasswordKeys(passwordValue, data)
+      passwordValue = result.input
+      if (result.echo) term.write(result.echo)
+      if (result.action === 'cancel') {
+        passwordValue = ''
+        term.write('^C\r\n')
+        useApp.getState().setPasswordPrompt(null)
+        void api.ssh.cancelPassword(prompt.requestId).catch(() => undefined)
+        return true
+      }
+      if (result.action === 'submit') {
+        if (!passwordValue) {
+          term.write('\x07')
+          return true
+        }
+        const password = passwordValue
+        passwordValue = ''
+        term.write('\r\n')
+        useApp.getState().setPasswordPrompt(null)
+        void api.ssh.providePassword(prompt.requestId, password).catch((error) => {
+          useApp.getState().setStatus(runtimeId, 'failed', (error as Error).message)
+        })
+      }
+      return true
+    }
     const writeInput = (data: string): void => {
       if (!data) return
+      if (handlePasswordInput(data)) return
       recorder.recordInput(runtimeId, data)
       void api.ssh.write(runtimeId, data)
     }
@@ -438,6 +474,26 @@ export function TerminalPane({
     }
   }, [connectionStatus, statusMessage])
 
+  // Password authentication failed: ask for the password in the terminal and
+  // keep the keystrokes local (see handlePasswordInput above).
+  useEffect(() => {
+    if (!passwordPrompt || passwordPrompt.runtimeId !== runtimeId) return
+    const term = terminalRef.current
+    if (!term) return
+    const title =
+      passwordPrompt.attempt > 1
+        ? tr('密码不正确，请重新输入密码', 'Incorrect password; try again')
+        : tr('密码认证失败，请输入密码', 'Password authentication failed; enter password')
+    term.write(
+      `\r\n\x1b[33m[HShell] ${title}（${passwordPrompt.username}@${passwordPrompt.host}）\x1b[0m\r\n`
+    )
+    term.write(
+      `\x1b[33m${tr('输入不会显示，回车确认，Ctrl+C 取消。', 'Input is hidden. Enter confirms, Ctrl+C cancels.')}\x1b[0m\r\n`
+    )
+    term.write(tr('密码：', 'Password: '))
+    term.focus()
+  }, [passwordPrompt, runtimeId])
+
   useEffect(() => {
     if (!visible) {
       webglRef.current?.dispose()
@@ -614,7 +670,14 @@ export function TerminalPane({
             <button className="btn btn-primary" onClick={retry}>
               {tr('重试', 'Retry')}
             </button>
-            <button className="btn" onClick={() => openSessionDialog(session)}>
+            <button
+              className="btn"
+              onClick={() =>
+                openSessionDialog(
+                  useApp.getState().sessions.find((item) => item.id === session.id) ?? session
+                )
+              }
+            >
               {tr('编辑会话', 'Edit session')}
             </button>
           </div>

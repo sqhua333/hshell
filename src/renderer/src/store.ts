@@ -3,6 +3,7 @@ import type {
   Folder,
   HostKeyPrompt,
   KeyboardPrompt,
+  PasswordPrompt,
   QuickCommand,
   RuntimeStatus,
   Session,
@@ -122,6 +123,8 @@ interface AppState {
   toasts: Toast[]
   hostKey: (HostKeyPrompt & { runtimeId: string }) | null
   keyboard: (KeyboardPrompt & { runtimeId: string }) | null
+  /** Inline terminal prompt shown after password authentication failed. */
+  passwordPrompt: (PasswordPrompt & { runtimeId: string }) | null
 
   sessionDialog: SessionDialogState
   shortcutsHelp: boolean
@@ -173,6 +176,7 @@ interface AppState {
 
   setHostKey(value: (HostKeyPrompt & { runtimeId: string }) | null): void
   setKeyboard(value: (KeyboardPrompt & { runtimeId: string }) | null): void
+  setPasswordPrompt(value: (PasswordPrompt & { runtimeId: string }) | null): void
 
   toggleSidebar(): void
   toggleSidebarAutoHide(): void
@@ -352,6 +356,7 @@ export const useApp = create<AppState>((set, get) => ({
   toasts: [],
   hostKey: null,
   keyboard: null,
+  passwordPrompt: null,
   sessionDialog: { open: false, initial: null, presetFolderId: null, initialTab: 'connection' },
   shortcutsHelp: false,
   aboutOpen: false,
@@ -644,9 +649,14 @@ export const useApp = create<AppState>((set, get) => ({
       // Leaving the failed state re-arms the dismissible error overlay.
       const failedDismissed = { ...state.failedDismissed }
       if (status !== 'failed') delete failedDismissed[runtimeId]
+      // A settled connection invalidates any inline password prompt.
+      const settled = status === 'connected' || status === 'failed' || status === 'closed'
+      const passwordPrompt =
+        settled && state.passwordPrompt?.runtimeId === runtimeId ? null : state.passwordPrompt
       return {
         statuses: { ...state.statuses, [runtimeId]: { ...state.statuses[runtimeId], status, message } },
-        failedDismissed
+        failedDismissed,
+        passwordPrompt
       }
     })
   },
@@ -752,6 +762,10 @@ export const useApp = create<AppState>((set, get) => ({
 
   setKeyboard(value) {
     set({ keyboard: value })
+  },
+
+  setPasswordPrompt(value) {
+    set({ passwordPrompt: value })
   },
 
   toggleSidebar() {

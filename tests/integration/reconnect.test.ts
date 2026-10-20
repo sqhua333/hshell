@@ -29,7 +29,7 @@ async function waitFor(check: () => boolean, timeout = 10_000): Promise<void> {
   }
 }
 
-async function startServer(acceptAuth: boolean): Promise<{
+async function startServer(acceptAuth: boolean, password?: string): Promise<{
   port: number
   /** Graceful end: sends SSH_MSG_DISCONNECT (BY_APPLICATION). */
   dropConnections: () => void
@@ -45,7 +45,9 @@ async function startServer(acceptAuth: boolean): Promise<{
     connections.add(connection)
     connection.on('close', () => connections.delete(connection))
     connection.on('authentication', (ctx) => {
-      if (acceptAuth) ctx.accept()
+      const acceptedPassword =
+        password !== undefined && ctx.method === 'password' && ctx.password === password
+      if (acceptAuth || acceptedPassword) ctx.accept()
       else ctx.reject(['password'])
     })
     // Register the session handler immediately: a fast client may open its
@@ -101,7 +103,8 @@ async function startServer(acceptAuth: boolean): Promise<{
 
 function setup(
   port: number,
-  reconnect?: ReconnectPolicy
+  reconnect?: ReconnectPolicy,
+  onPasswordAccepted?: (session: Session, password: string) => void
 ): {
   manager: SshManager
   events: AppEvent[]
@@ -120,7 +123,8 @@ function setup(
     undefined,
     undefined,
     undefined,
-    reconnect
+    reconnect,
+    onPasswordAccepted
   )
 
   return {
@@ -135,6 +139,12 @@ function setup(
         rows: 24
       })
   }
+}
+
+type PasswordRequestEvent = Extract<AppEvent, { type: 'ssh:password-request' }>
+
+function passwordRequests(events: AppEvent[]): PasswordRequestEvent[] {
+  return events.filter((event): event is PasswordRequestEvent => event.type === 'ssh:password-request')
 }
 
 describe('SshManager reconnect', () => {
@@ -201,14 +211,49 @@ describe('SshManager reconnect', () => {
     }
   }, 20_000)
 
-  it('does not retry when authentication fails', async () => {
+  it('does not retry when authentication fails and asks in the terminal', async () => {
     const server = await startServer(false)
-    const { manager, statuses, connect } = setup(server.port)
+    const { manager, events, statuses, connect } = setup(server.port)
     try {
       await connect()
-      await waitFor(() => statuses.includes('failed'))
+      await waitFor(() => passwordRequests(events).length === 1)
+      expect(passwordRequests(events)[0].prompt).toMatchObject({
+        host: '127.0.0.1',
+        username: 'tester',
+        attempt: 1
+      })
       await new Promise((resolve) => setTimeout(resolve, 1500))
       expect(statuses).not.toContain('reconnecting')
+      expect(statuses).not.toContain('failed')
+    } finally {
+      manager.disconnect('rt-reconnect')
+      await server.close()
+    }
+  }, 20_000)
+
+  it('retries with the password typed into the terminal and saves it', async () => {
+    const server = await startServer(false, 'correct-horse')
+    const saved: Array<{ sessionId: string; password: string }> = []
+    const { manager, events, statuses, connect } = setup(
+      server.port,
+      undefined,
+      (session, password) => saved.push({ sessionId: session.id, password })
+    )
+    try {
+      await connect()
+      await waitFor(() => passwordRequests(events).length === 1)
+
+      manager.providePassword(passwordRequests(events)[0].prompt.requestId, 'wrong-password')
+      await waitFor(() => passwordRequests(events).length === 2)
+      expect(passwordRequests(events)[1].prompt.attempt).toBe(2)
+      // Nothing is stored until the server accepts the password.
+      expect(saved).toHaveLength(0)
+
+      manager.providePassword(passwordRequests(events)[1].prompt.requestId, 'correct-horse')
+      await waitFor(() => statuses.includes('connected'))
+      await waitFor(() => saved.length === 1)
+      expect(saved[0]).toEqual({ sessionId: 's-reconnect', password: 'correct-horse' })
+      expect(statuses).not.toContain('failed')
     } finally {
       manager.disconnect('rt-reconnect')
       await server.close()

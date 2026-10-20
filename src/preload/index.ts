@@ -47,6 +47,9 @@ const api: HshellApi = {
     ack: (runtimeId, bytes) => ipcRenderer.invoke('ssh:ack', runtimeId, bytes),
     hostKeyDecision: (requestId, accept) =>
       ipcRenderer.invoke('ssh:hostKeyDecision', requestId, accept),
+    providePassword: (requestId, password) =>
+      ipcRenderer.invoke('ssh:providePassword', requestId, password),
+    cancelPassword: (requestId) => ipcRenderer.invoke('ssh:cancelPassword', requestId),
     keyboardInteractive: (requestId, responses, cancel) =>
       ipcRenderer.invoke('ssh:keyboardInteractive', requestId, responses, cancel)
   },

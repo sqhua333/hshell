@@ -74,6 +74,12 @@ export default function App(): ReactElement {
         case 'ssh:hostkey':
           state.setHostKey({ ...event.prompt, runtimeId: event.runtimeId })
           break
+        case 'ssh:password-request':
+          state.setPasswordPrompt({ ...event.prompt, runtimeId: event.runtimeId })
+          break
+        case 'sessions:changed':
+          void state.reloadSessions()
+          break
         case 'ssh:keyboard-interactive':
           state.setKeyboard({ ...event.prompt, runtimeId: event.runtimeId })
           break

@@ -100,6 +100,12 @@ interface Runtime {
   jumpStreams: ClientChannel[]
   /** Session recording, when enabled in the session settings. */
   log: SessionLogger | null
+  /** Request id while the terminal is waiting for a password. */
+  passwordRequest: string | null
+  /** Password typed into the terminal; persisted once authentication succeeds. */
+  retryPassword: string | null
+  /** Inline prompts shown so far, used to tell the user the password was wrong. */
+  passwordAttempts: number
 }
 
 interface TransferJob {
@@ -137,6 +143,16 @@ const AUTH_ERROR_PATTERN =
 
 function isAuthError(err: Error): boolean {
   return AUTH_ERROR_PATTERN.test(err.message || String(err))
+}
+
+/**
+ * ssh2 reports a rejected password (and every other exhausted auth method)
+ * with the same message. Only this text means "asking again can help".
+ */
+function isPasswordAuthFailure(err: Error): boolean {
+  return /All configured authentication methods failed|authentication methods failed/i.test(
+    err.message || String(err)
+  )
 }
 
 const noopZmodemHost: ZmodemHost = {
@@ -184,7 +200,12 @@ export class SshManager {
     private readonly zmodemHost: ZmodemHost = noopZmodemHost,
     private readonly resolveKey?: KeyResolver,
     private readonly logsDir?: string,
-    reconnect: ReconnectPolicy = {}
+    reconnect: ReconnectPolicy = {},
+    /**
+     * Called once a password typed into the terminal has been accepted, so the
+     * caller can store it encrypted and mark the session accordingly.
+     */
+    private readonly onPasswordAccepted?: (session: Session, password: string) => void
   ) {
     this.maxReconnectAttempts = reconnect.maxAttempts ?? RETRY_MAX_ATTEMPTS
     this.retryBaseMs = reconnect.baseDelayMs ?? RETRY_BASE_MS
@@ -223,7 +244,10 @@ export class SshManager {
       zmodem: null,
       jumpClients: [],
       jumpStreams: [],
-      log: null
+      log: null,
+      passwordRequest: null,
+      retryPassword: null,
+      passwordAttempts: 0
     }
     this.runtimes.set(req.runtimeId, rt)
     this.emit({ type: 'ssh:status', runtimeId: rt.runtimeId, status: 'connecting' })
@@ -492,6 +516,18 @@ export class SshManager {
       }
       ready = true
       rt.authenticated = true
+      // A password typed into the terminal worked: store it encrypted and mark
+      // the session so later connections do not ask again.
+      if (rt.retryPassword !== null) {
+        const password = rt.retryPassword
+        rt.retryPassword = null
+        rt.passwordAttempts = 0
+        try {
+          this.onPasswordAccepted?.(rt.session, password)
+        } catch {
+          /* saving credentials must never break the connection */
+        }
+      }
       const wasReconnect = rt.attempt > 0
       rt.attempt = 0
       rt.reconnectStartedAt = null
@@ -588,6 +624,12 @@ export class SshManager {
       sawError = true
       const message = friendlyError(err)
       if (isAuthError(err)) {
+        // Password auth: keep the runtime alive and ask in the terminal
+        // instead of ending with a failure dialog.
+        if (isPasswordAuthFailure(err) && rt.session.auth.method === 'password') {
+          this.requestPassword(rt, client)
+          return
+        }
         this.fail(rt, message)
         try {
           client.end()
@@ -774,6 +816,68 @@ export class SshManager {
   private findRuntimeByKeyboard(pending: PendingKeyboard): string | undefined {
     for (const [id, rt] of this.runtimes) {
       if (rt.pendingKeyboard === pending) return id
+    }
+    return undefined
+  }
+
+  /**
+   * Password authentication failed. Drop the dead attempt but keep the runtime
+   * so the renderer can collect a new password inline in the terminal.
+   */
+  private requestPassword(rt: Runtime, client: Client): void {
+    // Everything the failed attempt reports from now on is irrelevant.
+    rt.epoch += 1
+    rt.authenticated = false
+    rt.passwordAttempts += 1
+    rt.retryPassword = null
+    const requestId = randomUUID()
+    rt.passwordRequest = requestId
+    // Nulling the client makes the close/error handlers stand down; the next
+    // attempt builds a fresh client (and fresh jump hops).
+    if (rt.client === client) rt.client = null
+    this.closeJump(rt)
+    try {
+      client.end()
+    } catch {
+      /* already closing */
+    }
+    this.emit({
+      type: 'ssh:password-request',
+      runtimeId: rt.runtimeId,
+      prompt: {
+        requestId,
+        host: rt.session.host,
+        username: rt.session.username,
+        attempt: rt.passwordAttempts
+      }
+    })
+  }
+
+  /** Retry authentication with a password typed into the terminal. */
+  providePassword(requestId: string, password: string): void {
+    const rt = this.findRuntimeByPasswordRequest(requestId)
+    if (!rt) return
+    rt.passwordRequest = null
+    rt.retryPassword = password
+    rt.session = {
+      ...rt.session,
+      auth: { ...rt.session.auth, method: 'password', password }
+    }
+    this.open(rt)
+  }
+
+  /** The user pressed Ctrl+C while the inline password prompt was open. */
+  cancelPassword(requestId: string): void {
+    const rt = this.findRuntimeByPasswordRequest(requestId)
+    if (!rt) return
+    rt.passwordRequest = null
+    rt.retryPassword = null
+    this.fail(rt, '认证失败：已取消输入密码')
+  }
+
+  private findRuntimeByPasswordRequest(requestId: string): Runtime | undefined {
+    for (const rt of this.runtimes.values()) {
+      if (rt.passwordRequest === requestId) return rt
     }
     return undefined
   }

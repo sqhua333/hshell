@@ -524,6 +524,8 @@ export function createMockApi(): HshellApi {
       resize: async () => undefined,
       ack: async () => undefined,
       hostKeyDecision: async () => undefined,
+      providePassword: async () => undefined,
+      cancelPassword: async () => undefined,
       keyboardInteractive: async () => undefined
     },
     sftp: {

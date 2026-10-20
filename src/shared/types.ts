@@ -183,6 +183,15 @@ export interface FileEntry {
   mode: number
 }
 
+/** Inline terminal prompt asking for a password after authentication failed. */
+export interface PasswordPrompt {
+  requestId: string
+  host: string
+  username: string
+  /** 1 for the first prompt; later values mean the previous password failed. */
+  attempt: number
+}
+
 export interface HostKeyPrompt {
   requestId: string
   host: string
@@ -295,8 +304,11 @@ export type AppEvent =
   | { type: 'ssh:status'; runtimeId: string; status: SshStatus; message?: string }
   | { type: 'ssh:exit'; runtimeId: string; code?: number; signal?: string }
   | { type: 'ssh:hostkey'; runtimeId: string; prompt: HostKeyPrompt }
+  | { type: 'ssh:password-request'; runtimeId: string; prompt: PasswordPrompt }
   | { type: 'ssh:keyboard-interactive'; runtimeId: string; prompt: KeyboardPrompt }
   | { type: 'ssh:notice'; runtimeId?: string; level: 'info' | 'warn' | 'error'; message: string }
+  /** Persisted session metadata changed in the main process (e.g. saved password). */
+  | { type: 'sessions:changed' }
   | ({ type: 'zmodem:status' } & ZmodemStatusEvent)
   | ({ type: 'sftp:progress' } & SftpProgressEvent)
   | ({ type: 'tunnel:status' } & TunnelInfo)
@@ -431,6 +443,10 @@ export interface HshellApi {
     resize(runtimeId: string, cols: number, rows: number): Promise<void>
     ack(runtimeId: string, bytes: number): Promise<void>
     hostKeyDecision(requestId: string, accept: boolean): Promise<void>
+    /** Supply the password typed into the terminal and retry authentication. */
+    providePassword(requestId: string, password: string): Promise<void>
+    /** Abandon an inline password prompt (Ctrl+C in the terminal). */
+    cancelPassword(requestId: string): Promise<void>
     keyboardInteractive(requestId: string, responses?: string[], cancel?: boolean): Promise<void>
   }
   sftp: {

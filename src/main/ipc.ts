@@ -162,12 +162,30 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
       return result.canceled ? null : result.filePaths
     }
   }
+  /**
+   * A password typed into the terminal was accepted. Store it encrypted (never
+   * in sessions.json) and mark the session so the next connection reuses it.
+   */
+  const saveAcceptedPassword = (session: Session, password: string): void => {
+    const saved = store.findSession(session.id)
+    if (!saved || saved.auth.method !== 'password') return
+    credentials.put(sessionCredentialId(saved.id), password)
+    store.saveSession({ ...saved, auth: { ...saved.auth, savePassword: true } })
+    emit({ type: 'sessions:changed' })
+    emit({
+      type: 'ssh:notice',
+      level: 'info',
+      message: `密码已加密保存到会话「${saved.name}」`
+    })
+  }
   const ssh = new SshManager(
     knownHosts,
     emit,
     zmodemHost,
     (keyId) => keys.getPrivateKey(keyId),
-    join(userData, 'logs')
+    join(userData, 'logs'),
+    undefined,
+    saveAcceptedPassword
   )
   const serial = new SerialManager(emit, zmodemHost, join(userData, 'logs'))
 
@@ -384,6 +402,13 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   })
   handle('ssh:hostKeyDecision', (requestId: string, accept: boolean) =>
     ssh.hostKeyDecision(String(requestId), Boolean(accept))
+  )
+  handle('ssh:providePassword', (requestId: string, password: string) => {
+    if (typeof password !== 'string') throw new Error('密码无效')
+    ssh.providePassword(String(requestId), password)
+  })
+  handle('ssh:cancelPassword', (requestId: string) =>
+    ssh.cancelPassword(String(requestId))
   )
   handle('ssh:keyboardInteractive', (requestId: string, responses?: string[], cancel?: boolean) =>
     ssh.keyboardInteractive(String(requestId), responses, cancel)
