@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useEffect,
   useMemo,
   useRef,
@@ -29,8 +31,14 @@ import { useApp } from '../store'
 import { Icon } from './Icon'
 import { SessionDock } from './SessionDock'
 import { TabBar } from './TabBar'
-import { TerminalPane } from './TerminalPane'
 import { ZmodemProgress } from './ZmodemProgress'
+
+// xterm and its addons are by far the largest renderer dependency. Loading
+// them lazily keeps the initial bundle small so the window becomes usable
+// sooner; the chunk is prefetched right after the first paint.
+const TerminalPane = lazy(() =>
+  import('./TerminalPane').then((module) => ({ default: module.TerminalPane }))
+)
 
 function Welcome(): ReactElement {
   const sessions = useApp((state) => state.sessions)
@@ -225,6 +233,16 @@ export function TerminalArea(): ReactElement {
   const [query, setQuery] = useState('')
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
 
+  useEffect(() => {
+    // Give the first frame time to settle, then load terminal code so opening
+    // a session later does not show the placeholder.
+    const timer = window.setTimeout(
+      () => void import('./TerminalPane').catch(() => undefined),
+      1200
+    )
+    return () => window.clearTimeout(timer)
+  }, [])
+
   const geometryByTab = useMemo(
     () => new Map(tabs.map((tab) => [tab.id, computeGeometry(tab.layout)])),
     [tabs]
@@ -402,16 +420,24 @@ export function TerminalArea(): ReactElement {
                         height: `${rect.height * 100}%`
                       }}
                     >
-                      <TerminalPane
-                        runtimeId={pane.runtimeId}
-                        session={
-                          sessions.find((item) => item.id === pane.sessionId) ?? tab.session
+                      <Suspense
+                        fallback={
+                          <div className="terminal-loading">
+                            {tr('正在加载终端…', 'Loading terminal…')}
+                          </div>
                         }
-                        visible={tab.id === activeTabId}
-                        showClose={tab.panes.length > 1}
-                        autoConnect={pane.autoConnect}
-                        onClose={() => closePane(tab.id, pane.id)}
-                      />
+                      >
+                        <TerminalPane
+                          runtimeId={pane.runtimeId}
+                          session={
+                            sessions.find((item) => item.id === pane.sessionId) ?? tab.session
+                          }
+                          visible={tab.id === activeTabId}
+                          showClose={tab.panes.length > 1}
+                          autoConnect={pane.autoConnect}
+                          onClose={() => closePane(tab.id, pane.id)}
+                        />
+                      </Suspense>
                     </div>
                   )
                 })}

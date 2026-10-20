@@ -23,6 +23,7 @@ npm run build
 npm run e2e:drag-split                  # 拖拽分屏 UI 检查（需先构建，无头运行）
 npm run e2e:timestamps                  # 终端时间戳栏 UI 检查（需先构建，无头运行）
 npm run e2e:password                    # 终端内密码重试与加密保存检查（需先构建，无头运行）
+npm run e2e:startup-theme               # 启动主题引导与无闪烁检查（需先构建，无头运行）
 ```
 
 如果环境里设置了 `ELECTRON_RUN_AS_NODE=1`（某些 IDE 会注入），启动 Electron 时使用：
@@ -345,7 +346,10 @@ Windows 免安装版不需要管理员权限（可执行文件清单为 `asInvok
 提权或没有窗口，通常是解压目录受策略限制（如 `Program Files`、AppLocker）或
 SmartScreen 拦截未签名程序，请解压到桌面/文档等普通用户目录后再运行。HShell 采用
 单实例：已有实例在运行（尤其是以管理员身份启动的实例）时，新启动会弹窗说明并退出。
-窗口在创建后立即显示，不等待渲染完成。
+窗口在创建后立即显示，不等待渲染完成，首帧即为内置加载页；深色主题用户不会看到
+白色闪烁：主题保存在 `%APPDATA%\hshell\ui-prefs.json`，主进程用对应颜色绘制窗口背景，
+渲染页面在 React 启动前就从 preload 取得主题并应用。终端组件按需加载，首屏只需解析
+较小的主包，打开会话时终端代码通常已预取完成。
 
 如果窗口出现后立即消失，或弹窗提示“无法启动渲染进程”（`launch-failed`），说明
 Windows 的 Chromium 沙箱无法读取解压目录：该目录缺少 AppContainer SID 的读取/执行
@@ -384,7 +388,7 @@ HSHELL_SOAK_FULL=1 npx vitest run tests/integration/sftp-transfer.test.ts -t 100
 ```
 
 两个用例均使用进程内 SSH 服务器，不会连接或修改真实的 `~/.ssh`。本机实测
-100MB 往返约 11 秒；默认套件 248 个测试通过（220 个单元 + 28 个集成），另有 5 个
+100MB 往返约 11 秒；默认套件 253 个测试通过（225 个单元 + 28 个集成），另有 5 个
 浸泡测试默认跳过。串口集成测试通过 `socat` 虚拟串口运行，未安装 `socat` 时自动跳过。
 
 ## 已知限制

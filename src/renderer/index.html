@@ -4,13 +4,74 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>HShell</title>
+    <style>
+      html {
+        background: #eef1f5;
+      }
+      html[data-theme='dark'] {
+        background: #171b22;
+        color-scheme: dark;
+      }
+      #boot {
+        display: flex;
+        height: 100vh;
+        align-items: center;
+        justify-content: center;
+        background: #eef1f5;
+        color: #334155;
+        font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+        text-align: center;
+        line-height: 1.6;
+      }
+      #boot .boot-sub {
+        margin-top: 6px;
+        color: #64748b;
+        font-size: 12px;
+      }
+      html[data-theme='dark'] #boot {
+        background: #171b22;
+        color: #c7d0dc;
+      }
+      html[data-theme='dark'] #boot .boot-sub {
+        color: #8b96a6;
+      }
+    </style>
+    <script>
+      // Apply the saved theme before the first paint; React would otherwise
+      // render one light frame before its theme effect runs. The main process
+      // value wins because it also decides the native window background;
+      // localStorage is the fallback in the browser demo and for old installs.
+      var startupTheme = null
+      var startupSource = 'default'
+      try {
+        if (window.hshell && window.hshell.app) {
+          startupTheme = window.hshell.app.initialTheme || null
+          startupSource = 'preload'
+        }
+      } catch (error) {
+        /* preload may not be ready; fall back below */
+      }
+      if (startupTheme !== 'light' && startupTheme !== 'dark') {
+        try {
+          startupTheme = localStorage.getItem('hshell.uiTheme')
+          startupSource = 'storage'
+        } catch (error) {
+          startupTheme = null
+        }
+      }
+      if (startupTheme === 'dark') {
+        document.documentElement.dataset.theme = 'dark'
+      }
+      // Kept for startup E2E/diagnostics; React only rewrites `dataset.theme`.
+      document.documentElement.dataset.themeSource = startupSource
+    </script>
   </head>
   <body>
     <div id="root">
-      <div style="display: flex; height: 100vh; align-items: center; justify-content: center; background: #eef1f5; color: #334155; font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif; text-align: center; line-height: 1.6">
+      <div id="boot">
         <div>
           <div>正在加载 HShell…</div>
-          <div style="margin-top: 6px; color: #64748b; font-size: 12px">
+          <div class="boot-sub">
             如果长时间停留在这一页，安装文件可能不完整，请重新解压完整安装包。
           </div>
         </div>

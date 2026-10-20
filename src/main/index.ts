@@ -3,6 +3,7 @@ import { createWindow } from './window'
 import { registerIpc } from './ipc'
 import { createMenu } from './menu'
 import { logDiagnostic } from './diagnostics'
+import { readUiTheme } from './theme-prefs'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -64,14 +65,19 @@ if (!gotLock) {
   app.whenReady()
     .then(() => {
       logDiagnostic('app ready')
+      // Create the window before the (synchronous) store/menu setup so the
+      // loading screen appears as early as possible. IPC registration still
+      // finishes long before the renderer can issue its first call.
+      // Match the native window background to the saved theme so the very
+      // first frame is not a bright flash for dark-theme users.
+      mainWindow = createWindow(readUiTheme(app.getPath('userData')) ?? 'light')
+      logDiagnostic('window created')
       registerIpc(() => mainWindow)
       createMenu()
-      mainWindow = createWindow()
-      logDiagnostic('window created')
 
       app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {
-          mainWindow = createWindow()
+          mainWindow = createWindow(readUiTheme(app.getPath('userData')) ?? 'light')
         }
       })
     })

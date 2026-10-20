@@ -396,8 +396,16 @@ export interface SshConfigImportResult {
 
 export interface HshellApi {
   app: {
+    /**
+     * Saved theme from the main process (`null` when the user never chose
+     * one). Read synchronously by the pre-paint bootstrap so the first frame
+     * matches the saved theme.
+     */
+    readonly initialTheme: 'light' | 'dark' | null
     info(): Promise<AppInfo>
     setLocale(locale: Language): Promise<void>
+    /** Mirror the UI theme so the next window opens without a color flash. */
+    setTheme(theme: 'light' | 'dark'): Promise<void>
   }
   window: {
     toggleFullScreen(): Promise<void>

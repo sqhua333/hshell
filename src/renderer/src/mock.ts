@@ -364,7 +364,13 @@ export function createMockApi(): HshellApi {
 
   return {
     app: {
+      initialTheme:
+        typeof localStorage !== 'undefined' &&
+        localStorage.getItem('hshell.uiTheme') === 'dark'
+          ? 'dark'
+          : 'light',
       setLocale: async () => undefined,
+      setTheme: async () => undefined,
       info: async () => ({
         name: 'HShell',
         version: '0.1.0-demo',

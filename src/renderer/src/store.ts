@@ -223,6 +223,10 @@ function uid(prefix: string): string {
 }
 
 function readTheme(): 'light' | 'dark' {
+  // The main process decides the native window background, so its saved theme
+  // is authoritative; localStorage only drives the browser demo.
+  const fromMain = api.app.initialTheme
+  if (fromMain === 'dark' || fromMain === 'light') return fromMain
   try {
     return localStorage.getItem('hshell.uiTheme') === 'dark' ? 'dark' : 'light'
   } catch {
@@ -371,6 +375,12 @@ export const useApp = create<AppState>((set, get) => ({
   async init() {
     applyLocale(getLocale())
     void api.app.setLocale(getLocale()).catch(() => {
+      /* browser mock */
+    })
+    // Keep `ui-prefs.json` in sync so the main process can paint the window
+    // with the right background before the first frame, including upgrades
+    // from builds that only stored the theme in localStorage.
+    void api.app.setTheme(get().uiTheme).catch(() => {
       /* browser mock */
     })
     const [info, data, savedLayout] = await Promise.all([
@@ -808,6 +818,9 @@ export const useApp = create<AppState>((set, get) => ({
     } catch {
       /* ignore */
     }
+    void api.app.setTheme(next).catch(() => {
+      /* browser mock */
+    })
   },
 
   setLocale(locale) {

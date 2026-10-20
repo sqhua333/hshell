@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, nativeImage, shell } from 'electron'
 import { dirname, join } from 'node:path'
 import { launchFailureMessage } from './diagnostic-messages'
 import { logDiagnostic } from './diagnostics'
+import { WINDOW_BACKGROUND, type UiTheme } from './theme-prefs'
 
 /**
  * Record renderer failures where the user can find them even when the window
@@ -21,7 +22,7 @@ const WINDOW_ICON = app.isPackaged
   ? join(process.resourcesPath, 'icon.png')
   : join(app.getAppPath(), 'build', 'icons', '128x128.png')
 
-export function createWindow(): BrowserWindow {
+export function createWindow(theme: UiTheme = 'light'): BrowserWindow {
   const icon = nativeImage.createFromPath(WINDOW_ICON)
   const win = new BrowserWindow({
     width: 1360,
@@ -35,7 +36,7 @@ export function createWindow(): BrowserWindow {
     show: true,
     title: 'HShell',
     icon,
-    backgroundColor: '#eef1f5',
+    backgroundColor: WINDOW_BACKGROUND[theme],
     autoHideMenuBar: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -43,7 +44,10 @@ export function createWindow(): BrowserWindow {
       sandbox: true,
       nodeIntegration: false,
       webviewTag: false,
-      spellcheck: false
+      spellcheck: false,
+      // Read by the preload script and the inline bootstrap in index.html so
+      // the first rendered frame already matches the saved theme.
+      additionalArguments: [`--hshell-theme=${theme}`]
     }
   })
 

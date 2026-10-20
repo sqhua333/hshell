@@ -630,7 +630,7 @@ mac:
 
 ---
 
-## 12. 当前实现状态（2026-10-18）
+## 12. 当前实现状态（2026-10-20）
 
 已完成并验证的 UI / 核心链路：
 
@@ -741,6 +741,13 @@ mac:
   `CredentialStore` 加密保存到会话（`savePassword` 置为真）并通知界面刷新会话
   列表；失败则再次提示并标注「密码不正确」。私钥/agent/host key 等其他认证错误
   仍按原逻辑显示失败卡片。
+- **启动体验**：窗口创建后立即显示，`index.html` 的静态加载页先于 React 出现
+  （首帧约 0.25–0.4 秒）；主进程先创建窗口，再注册 IPC 与菜单。界面主题持久化到
+  `<userData>/ui-prefs.json`，同时用于原生窗口背景色；preload 在页面脚本之前通过
+  同步 IPC 读取该值，`index.html` 在首帧前应用 `html[data-theme]`。深色主题在
+  启动、「重新加载界面」以及从仅使用 localStorage 的旧版本升级时都不会闪白或
+  被重置。终端组件（xterm 及 addon，约 676KB）改为按需 chunk，首帧后 1.2 秒预取，
+  首屏主包从约 1.6MB 降到约 0.96MB。
 - **加固（P10）**：可选浸泡测试覆盖 20 个并发会话连续 3 轮（峰值 20 连接、结束后
   `SshManager` 运行表为空、服务器无残留连接）、16MB 终端输出背压（未确认数据峰值
   < 8MB，ack 后完整收齐）、10 个并发重复 `connect` 收敛为 1 条连接、30 次快速
@@ -759,7 +766,16 @@ mac:
   `serial.list()` 并枚举真实设备。Windows `--dir`、免安装单文件
   （`dist:win:portable`，约 94MB）与 zip（`dist:win:zip`，约 146MB）产物已生成并检查，
   ASAR 内包含当前源码。Windows 启动体验：窗口在 `BrowserWindow` 创建后立即显示
-  （不再等待 `ready-to-show`，冷启动/杀软扫描时不会长时间没有任何反馈）；单实例锁
+  （不再等待 `ready-to-show`，冷启动/杀软扫描时不会长时间没有任何反馈），主进程先
+  创建窗口、再同步注册 IPC 与菜单，避免存储初始化推迟首帧；`index.html` 内置静态
+  加载页，首帧约 0.25–0.4 秒出现。主题不闪烁：主进程把界面主题持久化到
+  `<userData>/ui-prefs.json`，创建窗口时用对应颜色作为原生 `backgroundColor`，并通过
+  `additionalArguments: --hshell-theme=…` 传给 preload；`index.html` 在 head 中、
+  React bundle 之前的内联脚本同步读取该值并设置 `html[data-theme]`，深色用户从第一帧
+  起就是深色（加载页也同步使用深色配色）。主题以主进程记录为准，localStorage 仅作为
+  浏览器演示与旧版本的兜底，因此即使 `localStorage` 未落盘也能正确恢复。渲染端把
+  xterm 及其 addon 拆成按需 chunk（首包从约 1.6MB 降到约 0.96MB），首帧后 1.2 秒
+  预取，打开会话时无需等待。单实例锁
   获取失败时在 Windows 上弹窗说明原因（已有实例，或两个实例权限级别不同），而不是
   静默退出。渲染页面加载失败（例如 `app.asar` 解压不完整、被占用或被杀软拦截）时，
   主进程会把 `did-fail-load`、`render-process-gone`、preload 与渲染进程错误写入
@@ -774,7 +790,7 @@ mac:
   用户目录运行。NSIS 安装包在 Linux 上交叉构建需要 wine32（electron-builder
   需运行 32 位安装器生成卸载程序，本机未安装），macOS 产物需要 macOS 主机，二者由
   `.github/workflows/build.yml` 在 CI 中构建。
-- **验证**：`npm run typecheck` 通过；默认 248 个测试通过（220 个单元 + 28 个集成
+- **验证**：`npm run typecheck` 通过；默认 253 个测试通过（225 个单元 + 28 个集成
   测试；覆盖迁移、导出导入往返、文件夹环、ssh config、ZMODEM 双向协议与
   远端跳过/本地写入失败、串口 ANSI
   颜色透传、断线自动
@@ -791,7 +807,8 @@ mac:
   布局树构建恢复与旧平面格式兼容/损坏回退、i18n 切换、串口参数
   规范化与 socat 虚拟串口双向收发 / 日志 / ZMODEM / 错误提示、输出规则引擎与
   跨块匹配/冷却、录制器与回放脚本语法、配色方案解析、自动化 schema、
-  启动诊断文案与 ACL 修复命令、会话管理器宽度夹取、跳板机逐跳凭据恢复与
+  启动诊断文案与 ACL 修复命令、界面主题偏好读写（未设置/损坏/归一化）、
+  会话管理器宽度夹取、跳板机逐跳凭据恢复与
   密码落盘/导出脱敏、全局快速命令的归一/去重/上限/迁移、本地 SFTP 起始目录）。另有 5 个默认跳过
   的浸泡测试，用 `HSHELL_SOAK=1` /
   `HSHELL_SOAK_FULL=1` 开启（20 会话 ×3 轮、16MB 背压、并发连接风暴、30 次连接
@@ -825,6 +842,10 @@ mac:
   不出现失败卡片，键入内容仅以 `*` 显示（终端文本中无明文），回车后服务器接受并
   输出 `SHELL READY`；随后 `sessions.json` 的 `savePassword` 变为 `true`，
   `credentials.json` 存在密文条目，两个文件均不含明文密码。
+  启动主题专项检查由 `npm run e2e:startup-theme` 固化：确认构建产物在 React bundle
+  之前执行主题引导脚本；默认启动为浅色且 `ui-prefs.json` 写入 `light`；切换主题后
+  DOM、localStorage 与 `ui-prefs.json` 均为 `dark`；清空 localStorage 后重启，仍由
+  主进程传入的主题在首帧恢复深色（`data-theme-source` 为 `preload`）。
   断线专项检查用 SIGSTOP 冻结 mock sshd 模拟设备失联：
   keepalive 在约 60 秒发现链路失效并进入自动重连，预算（8 次/约 120 秒）耗尽后状态
   变为「已断开」而非无限重连，终端缓冲同时打印 `[HShell] 连接已断开…` 与
@@ -982,7 +1003,11 @@ mac:
 - react-resizable-panels v4 的 API 为 `Group` / `Panel` / `Separator`（`orientation`），
   不是旧版的 `PanelGroup` / `PanelResizeHandle`。
 - 主题变量定义在 `:root`，并由 `App.tsx` 同步 `html[data-theme]`，保证通过 portal
-  渲染的对话框也能继承主题。
+  渲染的对话框也能继承主题。启动阶段的主题由主进程 `ui-prefs.json` 经
+  `additionalArguments` 同步交给 preload，`index.html` 的内联脚本在首帧前应用，
+  React 挂载后继续以 store 中的主题为准。
+- 终端面板用 `React.lazy` 延迟加载（`TerminalPane` chunk 约 676KB），首屏只加载
+  约 962KB 的主包；首帧后 1.2 秒预取，首次打开会话不会出现明显等待。
 - 无头 Electron 在本机运行一段时间后可能以 SIGTRAP/SIGSEGV 退出，属无显示环境下的
   Chromium 限制；真实桌面会话不受影响。UI 验证使用 `--headless --ozone-platform=headless`
   加 CDP（`scripts/cdp-eval.mjs`、`scripts/cdp-type.mjs`）。

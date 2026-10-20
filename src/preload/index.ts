@@ -1,10 +1,33 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { AppEvent, HshellApi } from '@shared/types'
 
+/**
+ * Ask the main process for the saved theme synchronously so the pre-paint
+ * bootstrap in index.html can apply it before React loads. Reading it on every
+ * load (rather than trusting the launch argument) keeps the theme correct
+ * after "Reload Interface". The launch argument is only a fallback.
+ */
+function readInitialTheme(): 'light' | 'dark' | null {
+  try {
+    const saved = ipcRenderer.sendSync('app:getTheme') as { theme?: unknown } | undefined
+    if (saved && typeof saved === 'object') {
+      return saved.theme === 'dark' ? 'dark' : saved.theme === 'light' ? 'light' : null
+    }
+  } catch {
+    /* handler not ready; use the launch argument below */
+  }
+  const arg = process.argv.find((item) => item.startsWith('--hshell-theme='))
+  if (arg === '--hshell-theme=dark') return 'dark'
+  if (arg === '--hshell-theme=light') return 'light'
+  return null
+}
+
 const api: HshellApi = {
   app: {
+    initialTheme: readInitialTheme(),
     info: () => ipcRenderer.invoke('app:info'),
-    setLocale: (locale) => ipcRenderer.invoke('app:setLocale', locale)
+    setLocale: (locale) => ipcRenderer.invoke('app:setLocale', locale),
+    setTheme: (theme) => ipcRenderer.invoke('app:setTheme', theme)
   },
   window: {
     toggleFullScreen: () => ipcRenderer.invoke('window:toggleFullScreen')

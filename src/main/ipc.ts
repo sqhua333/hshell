@@ -39,6 +39,7 @@ import {
 } from './storage/export-import'
 import { sshConfigToSessions } from './storage/ssh-config'
 import { resolveStartDir } from './util/start-dir'
+import { readUiTheme, writeUiTheme } from './theme-prefs'
 import {
   attachStoredCredentials,
   jumpCredentialId,
@@ -203,6 +204,16 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     })
   }
 
+  // Synchronous query used by the preload before the first paint. Returns
+  // `{ theme: null }` when the user has never chosen a theme.
+  ipcMain.on('app:getTheme', (event) => {
+    const win = getWindow()
+    event.returnValue =
+      win && event.sender === win.webContents
+        ? { theme: readUiTheme(userData) }
+        : { theme: null }
+  })
+
   handle('app:info', () => ({
     name: 'HShell',
     version: app.getVersion(),
@@ -213,6 +224,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   handle('app:setLocale', (locale: unknown) => {
     createMenu(locale === 'en' ? 'en' : 'zh')
   })
+  // Remember the theme so the next window starts with a matching background.
+  handle('app:setTheme', (theme: unknown) => writeUiTheme(userData, theme))
 
   handle('window:toggleFullScreen', () => {
     const win = getWindow()
