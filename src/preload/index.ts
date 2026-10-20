@@ -75,6 +75,7 @@ const api: HshellApi = {
   },
   fs: {
     home: () => ipcRenderer.invoke('fs:home'),
+    startDir: () => ipcRenderer.invoke('fs:startDir'),
     list: (path) => ipcRenderer.invoke('fs:list', path),
     mkdir: (path) => ipcRenderer.invoke('fs:mkdir', path),
     remove: (path, isDir) => ipcRenderer.invoke('fs:remove', path, isDir),

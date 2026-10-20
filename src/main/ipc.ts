@@ -38,6 +38,7 @@ import {
   serializeBundle
 } from './storage/export-import'
 import { sshConfigToSessions } from './storage/ssh-config'
+import { resolveStartDir } from './util/start-dir'
 import {
   attachStoredCredentials,
   jumpCredentialId,
@@ -422,6 +423,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   handle('layouts:save', (input: unknown) => layouts.save(windowLayoutSchema.parse(input)))
 
   handle('fs:home', () => os.homedir())
+  handle('fs:startDir', () =>
+    resolveStartDir(os.homedir(), (path) => {
+      try {
+        return statSync(path).isDirectory()
+      } catch {
+        return false
+      }
+    })
+  )
   handle('fs:list', (path: string) => localList(String(path)))
   handle('fs:mkdir', (path: string) => {
     mkdirSync(assertAbsolute(path))

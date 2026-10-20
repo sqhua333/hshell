@@ -462,6 +462,8 @@ export interface HshellApi {
   }
   fs: {
     home(): Promise<string>
+    /** Desktop when it exists, otherwise home. */
+    startDir(): Promise<string>
     list(path: string): Promise<FileEntry[]>
     mkdir(path: string): Promise<void>
     remove(path: string, isDir: boolean): Promise<void>

@@ -609,6 +609,8 @@ export function createMockApi(): HshellApi {
     },
     fs: {
       home: async () => HOME,
+      startDir: async () =>
+        localTree.get(`${HOME}/Desktop`)?.type === 'directory' ? `${HOME}/Desktop` : HOME,
       list: async (path) => listTree(localTree, path),
       mkdir: async (path) => {
         const target = normalizePath(path)

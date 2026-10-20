@@ -220,7 +220,7 @@ export function SftpPanel(): ReactElement {
   useEffect(() => {
     let cancelled = false
     void api.fs
-      .home()
+      .startDir()
       .then((home) => {
         if (!cancelled) void loadLocal(home)
       })

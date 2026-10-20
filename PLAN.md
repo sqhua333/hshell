@@ -653,8 +653,9 @@ mac:
   导出 / 导入 JSON 会话包（默认不含密钥，可选口令加密私钥）；`~/.ssh/config`
   导入（Host/HostName/User/Port/IdentityFile/ProxyJump，自动去重）。
 - **SFTP**：远程目录浏览、上传 / 下载（含递归）、新建目录、重命名、删除、chmod；
-  本地面板同等的目录操作。远程面板默认打开主机桌面目录（`~/Desktop`，兼容本地化
-  的 `~/桌面`），桌面目录不存在时回退到登录主目录。传输使用临时名（`.hshell-upload-*` / `.hshell-download-*`）
+  本地面板同等的目录操作。本地面板默认打开本机桌面（`Desktop`，兼容本地化的
+  `桌面`），远程面板默认打开主机桌面目录（`~/Desktop` / `~/桌面`），桌面目录不
+  存在时分别回退到各自的主目录。传输使用临时名（`.hshell-upload-*` / `.hshell-download-*`）
   流式写入后原子 rename，实时进度（字节 / 百分比）显示在面板与状态栏，可随时取消并
   清理临时文件；断线时自动取消该会话的全部传输。远程路径强制绝对路径、拒绝 `..`
   与控制字符；下载文件名经 Windows 保留名 / 控制字符消毒，并做本地目录包含校验，
@@ -764,7 +765,7 @@ mac:
   用户目录运行。NSIS 安装包在 Linux 上交叉构建需要 wine32（electron-builder
   需运行 32 位安装器生成卸载程序，本机未安装），macOS 产物需要 macOS 主机，二者由
   `.github/workflows/build.yml` 在 CI 中构建。
-- **验证**：`npm run typecheck` 通过；默认 234 个测试通过（207 个单元 + 27 个集成
+- **验证**：`npm run typecheck` 通过；默认 238 个测试通过（211 个单元 + 27 个集成
   测试；覆盖迁移、导出导入往返、文件夹环、ssh config、ZMODEM 双向协议、串口 ANSI
   颜色透传、断线自动
   重连、重连预算耗尽后自动断开、主机明确断开时不重连、认证失败不重试、
@@ -779,7 +780,7 @@ mac:
   规范化与 socat 虚拟串口双向收发 / 日志 / ZMODEM / 错误提示、输出规则引擎与
   跨块匹配/冷却、录制器与回放脚本语法、配色方案解析、自动化 schema、
   启动诊断文案与 ACL 修复命令、会话管理器宽度夹取、跳板机逐跳凭据恢复与
-  密码落盘/导出脱敏、全局快速命令的归一/去重/上限/迁移）。另有 5 个默认跳过
+  密码落盘/导出脱敏、全局快速命令的归一/去重/上限/迁移、本地 SFTP 起始目录）。另有 5 个默认跳过
   的浸泡测试，用 `HSHELL_SOAK=1` /
   `HSHELL_SOAK_FULL=1` 开启（20 会话 ×3 轮、16MB 背压、并发连接风暴、30 次连接
   循环、100MB SFTP 往返），均已在本机通过。`npm run build` 通过；打包后的
@@ -872,7 +873,9 @@ mac:
   写入 `.hshell-upload-<rand>` / `.hshell-download-<rand>` 后 rename，失败或取消时
   删除临时文件；`transferId` 贯穿 IPC 与 `sftp:progress` 事件，状态栏点击可取消，
   断开/失败会取消该 runtime 的全部任务；下载对符号链接 `lstat` 跳过，并限制递归
-  深度 64、文件数 20000。`SftpPanel` 增加 chmod 与传输条。集成测试用内存 SFTP
+  深度 64、文件数 20000。`SftpPanel` 增加 chmod 与传输条；本地面板经
+  `util/start-dir.ts` 打开本机桌面（`Desktop`/`桌面`），远端面板打开主机桌面，
+  缺失时分别回退到各自主目录。集成测试用内存 SFTP
   服务器验证 SHA-256 往返、原子性、取消清理与 chmod；单测对 sanitizer 做 500 轮
   确定性模糊测试。
 - P6 完成：`ssh/forward-service.ts` 独立管理所有转发规则（不依赖 Electron）。`-L`
