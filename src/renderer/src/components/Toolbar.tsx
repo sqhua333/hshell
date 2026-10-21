@@ -34,13 +34,6 @@ export function Toolbar(): ReactElement {
     <div className="toolbar">
       <button
         className="tool-btn"
-        title={tr('新建会话 (Ctrl+N)', 'New session (Ctrl+N)')}
-        onClick={() => void runAction('session:new')}
-      >
-        <Icon name="plus" />
-      </button>
-      <button
-        className="tool-btn"
         title={tr('打开会话管理器 (Ctrl+O)', 'Session manager (Ctrl+O)')}
         onClick={() => void runAction('session:open')}
       >
