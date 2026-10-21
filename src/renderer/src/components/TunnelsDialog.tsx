@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react'
 import type { TunnelInfo, TunnelType } from '@shared/types'
+import { isNonSshSession } from '@shared/session'
 import { api } from '../api'
 import { tr } from '../lib/i18n'
-import { useApp } from '../store'
+import { sessionForRuntime, useApp } from '../store'
 import { Icon } from './Icon'
 import { Modal } from './Modal'
 
@@ -50,22 +51,9 @@ function TunnelsDialogInner(): ReactElement {
   const status = useApp((state) =>
     state.activeRuntimeId ? state.statuses[state.activeRuntimeId]?.status : undefined
   )
-  const sessionName = useApp((state) => {
-    if (!state.activeRuntimeId) return null
-    for (const tab of state.tabs) {
-      if (tab.panes.some((pane) => pane.runtimeId === state.activeRuntimeId)) return tab.session.name
-    }
-    return null
-  })
-  const serialSession = useApp((state) => {
-    if (!state.activeRuntimeId) return false
-    for (const tab of state.tabs) {
-      if (tab.panes.some((pane) => pane.runtimeId === state.activeRuntimeId)) {
-        return tab.session.connectionType === 'serial'
-      }
-    }
-    return false
-  })
+  const activeSession = useApp((state) => sessionForRuntime(state.activeRuntimeId, state))
+  const sessionName = activeSession?.name ?? null
+  const nonSshSession = isNonSshSession(activeSession)
   const tunnels = useApp((state) =>
     runtimeId ? state.tunnels[runtimeId] ?? NO_TUNNELS : NO_TUNNELS
   )
@@ -91,7 +79,7 @@ function TunnelsDialogInner(): ReactElement {
   }, [refresh])
 
   const connected = status === 'connected'
-  const disabled = !runtimeId || !connected || busy || serialSession
+  const disabled = !runtimeId || !connected || busy || nonSshSession
 
   const start = async (): Promise<void> => {
     if (busy) return
@@ -157,8 +145,8 @@ function TunnelsDialogInner(): ReactElement {
     <Modal
       title={tr('端口转发', 'Port forwarding')}
       subtitle={
-        serialSession
-          ? tr('串口会话不支持端口转发', 'Port forwarding is unavailable for serial sessions')
+        nonSshSession
+          ? tr('端口转发需要 SSH 会话', 'Port forwarding requires an SSH session')
           : sessionName
             ? tr(
                 `会话：${sessionName}${connected ? '' : '（未连接）'}`,

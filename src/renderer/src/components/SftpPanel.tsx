@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactElement } from 'react'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 import type { FileEntry } from '@shared/types'
+import { isNonSshSession } from '@shared/session'
 import { api } from '../api'
 import { tr } from '../lib/i18n'
-import { useApp } from '../store'
+import { sessionForRuntime, useApp } from '../store'
 import { Icon } from './Icon'
 import { Modal } from './Modal'
 
@@ -148,15 +149,9 @@ export function SftpPanel(): ReactElement {
   const status = useApp((state) =>
     state.activeRuntimeId ? state.statuses[state.activeRuntimeId]?.status : undefined
   )
-  const serialActive = useApp((state) => {
-    if (!state.activeRuntimeId) return false
-    for (const tab of state.tabs) {
-      if (tab.panes.some((pane) => pane.runtimeId === state.activeRuntimeId)) {
-        return tab.session.connectionType === 'serial'
-      }
-    }
-    return false
-  })
+  const nonSshActive = useApp((state) =>
+    isNonSshSession(sessionForRuntime(state.activeRuntimeId, state))
+  )
   const addToast = useApp((state) => state.addToast)
 
   const [localPath, setLocalPath] = useState('')
@@ -182,7 +177,7 @@ export function SftpPanel(): ReactElement {
     onSubmit: (value: string) => void
   } | null>(null)
 
-  const remoteReady = Boolean(activeRuntimeId) && status === 'connected' && !serialActive
+  const remoteReady = Boolean(activeRuntimeId) && status === 'connected' && !nonSshActive
 
   const loadLocal = async (path: string): Promise<void> => {
     setLocalLoading(true)
@@ -232,7 +227,7 @@ export function SftpPanel(): ReactElement {
   }, [])
 
   useEffect(() => {
-    if (!activeRuntimeId || status !== 'connected' || serialActive) {
+    if (!activeRuntimeId || status !== 'connected' || nonSshActive) {
       setRemoteEntries([])
       setRemotePath('')
       setRemoteDraft('')
@@ -252,7 +247,7 @@ export function SftpPanel(): ReactElement {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeRuntimeId, status, serialActive])
+  }, [activeRuntimeId, status, nonSshActive])
 
   const requireRemote = (): string | null => {
     if (!activeRuntimeId || !remoteReady) {

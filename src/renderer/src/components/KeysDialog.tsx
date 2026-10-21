@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react'
 import type { KeyAlgorithm, KeyMetadata, VaultStatus } from '@shared/types'
+import { isNonSshSession } from '@shared/session'
 import { api } from '../api'
 import { tr } from '../lib/i18n'
-import { useApp } from '../store'
+import { sessionForRuntime, useApp } from '../store'
 import { Icon } from './Icon'
 import { Modal } from './Modal'
 
@@ -25,15 +26,9 @@ function KeysDialogInner(): ReactElement {
   const activeStatus = useApp((state) =>
     state.activeRuntimeId ? state.statuses[state.activeRuntimeId]?.status : undefined
   )
-  const serialActive = useApp((state) => {
-    if (!state.activeRuntimeId) return false
-    for (const tab of state.tabs) {
-      if (tab.panes.some((pane) => pane.runtimeId === state.activeRuntimeId)) {
-        return tab.session.connectionType === 'serial'
-      }
-    }
-    return false
-  })
+  const nonSshActive = useApp((state) =>
+    isNonSshSession(sessionForRuntime(state.activeRuntimeId, state))
+  )
 
   const [status, setStatus] = useState<VaultStatus | null>(null)
   const [keys, setKeys] = useState<KeyMetadata[]>([])
@@ -173,7 +168,7 @@ function KeysDialogInner(): ReactElement {
 
   const locked = status?.mode === 'password' && !status.unlocked
   const initializing = locked && !status.initialized
-  const connected = activeStatus === 'connected' && !serialActive
+  const connected = activeStatus === 'connected' && !nonSshActive
   const bitsOptions = algorithm === 'rsa' ? ['3072', '4096'] : ['256', '384', '521']
 
   return (
@@ -282,8 +277,8 @@ function KeysDialogInner(): ReactElement {
                       title={
                         connected
                           ? tr('安装到当前连接的服务器', 'Install on the connected server')
-                          : serialActive
-                            ? tr('串口会话不支持安装公钥', 'Installing public keys requires an SSH session')
+                          : nonSshActive
+                            ? tr('安装公钥需要 SSH 会话', 'Installing public keys requires an SSH session')
                             : tr('需要先连接一个会话才能安装公钥', 'Connect a session before installing a public key')
                       }
                       disabled={!connected || busy}

@@ -14,6 +14,20 @@ export function isSerialSession(
   return session?.connectionType === 'serial'
 }
 
+/** An embedded shell running on this machine (no remote connection). */
+export function isLocalSession(
+  session: Pick<Session, 'connectionType'> | null | undefined
+): boolean {
+  return session?.connectionType === 'local'
+}
+
+/** SFTP, port forwarding and public-key installation require an SSH session. */
+export function isNonSshSession(
+  session: Pick<Session, 'connectionType'> | null | undefined
+): boolean {
+  return isSerialSession(session) || isLocalSession(session)
+}
+
 /** `8N1` style framing description. */
 export function serialFrame(options: SerialOptions): string {
   return `${options.dataBits}${PARITY_LETTER[options.parity]}${options.stopBits}`
@@ -27,5 +41,8 @@ export function serialTarget(options: SerialOptions): string {
 /** Human-readable destination for either connection type. */
 export function sessionTarget(session: Session): string {
   if (isSerialSession(session) && session.serial) return serialTarget(session.serial)
+  // A local shell has no destination; its tab name (e.g. "本地终端 2") is the
+  // only meaningful label.
+  if (isLocalSession(session)) return session.name
   return `${session.username}@${session.host}:${session.port}`
 }

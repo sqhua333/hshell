@@ -21,7 +21,7 @@ export function TabBar(): ReactElement | null {
   const statuses = useApp((state) => state.statuses)
   const activateTab = useApp((state) => state.activateTab)
   const closeTab = useApp((state) => state.closeTab)
-  const openSessionDialog = useApp((state) => state.openSessionDialog)
+  const openLocalShell = useApp((state) => state.openLocalShell)
 
   if (tabs.length === 0) return null
 
@@ -70,8 +70,10 @@ export function TabBar(): ReactElement | null {
       </div>
       <button
         className="tab-add"
-        title={tr('新建会话 (Ctrl+N)', 'New session (Ctrl+N)')}
-        onClick={() => openSessionDialog(null)}
+        // The tab bar's plus is deliberately not "new session": it opens the
+        // current system's shell, like a terminal emulator's new-tab button.
+        title={tr('打开本地终端', 'Open local terminal')}
+        onClick={() => openLocalShell()}
       >
         <Icon name="plus" size={14} />
       </button>

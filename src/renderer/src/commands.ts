@@ -1,11 +1,11 @@
 import type { Session } from '@shared/types'
-import { isSerialSession } from '@shared/session'
+import { isNonSshSession } from '@shared/session'
 import { api } from './api'
 import { tr } from './lib/i18n'
 import { getTerminal } from './lib/terminal-registry'
 import { parseQuickConnect } from './lib/quick-connect'
 import type { ShortcutAction } from './lib/shortcuts'
-import { useApp } from './store'
+import { sessionForRuntime, useApp } from './store'
 
 export { parseQuickConnect }
 
@@ -39,10 +39,9 @@ export async function reconnectActive(): Promise<void> {
   const pane =
     tab.panes.find((item) => item.runtimeId === state.activeRuntimeId) ?? tab.panes[0]
   if (!pane) return
-  // Split panes may hold different sessions (e.g. SSH + serial), so reconnect
-  // the pane's own session rather than the tab's primary one.
-  const session =
-    state.sessions.find((item) => item.id === pane.sessionId) ?? tab.session
+  // Split panes may hold different sessions (e.g. SSH + serial + local), so
+  // reconnect the pane's own session rather than the tab's primary one.
+  const session = sessionForRuntime(pane.runtimeId, state) ?? tab.session
   const handle = getTerminal(pane.runtimeId)
   const cols = handle?.terminal.cols || 80
   const rows = handle?.terminal.rows || 24
@@ -132,11 +131,11 @@ export async function runAction(action: ShortcutAction | string): Promise<void> 
       break
 
     case 'view:sftp': {
-      const tab = state.tabs.find((item) => item.id === state.activeTabId)
-      if (isSerialSession(tab?.session)) {
+      const session = sessionForRuntime(state.activeRuntimeId, state)
+      if (isNonSshSession(session)) {
         state.addToast(
           'warn',
-          tr('串口会话不支持 SFTP', 'SFTP is unavailable for serial sessions')
+          tr('SFTP 需要 SSH 会话', 'SFTP requires an SSH session')
         )
         break
       }

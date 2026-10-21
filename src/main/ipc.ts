@@ -27,6 +27,7 @@ import { AppStore } from './store'
 import { CredentialStore } from './storage/credential-store'
 import { LayoutStore } from './storage/layout-store'
 import { listSerialPorts, SerialManager } from './serial/manager'
+import { LocalShellManager } from './local/manager'
 import { KeyService } from './ssh/key-service'
 import { KnownHosts } from './ssh/known-hosts'
 import { SshManager } from './ssh/manager'
@@ -189,6 +190,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     saveAcceptedPassword
   )
   const serial = new SerialManager(emit, zmodemHost, join(userData, 'logs'))
+  const local = new LocalShellManager(emit)
 
   const assertSender = (event: IpcMainInvokeEvent): void => {
     const win = getWindow()
@@ -389,28 +391,36 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
       await serial.connect(parsed)
       return
     }
+    if (parsed.session.connectionType === 'local') {
+      await local.connect(parsed)
+      return
+    }
     const session = attachStoredCredentials(parsed.session, credentials)
     await ssh.connect({ ...parsed, session })
   })
-  // Serial runtimes use the same channels; dispatch by runtime ownership.
+  // Serial and local runtimes use the same channels; dispatch by ownership.
   handle('ssh:disconnect', (runtimeId: string) => {
     const id = String(runtimeId)
-    if (serial.has(id)) serial.disconnect(id)
+    if (local.has(id)) local.disconnect(id)
+    else if (serial.has(id)) serial.disconnect(id)
     else ssh.disconnect(id)
   })
   handle('ssh:write', (runtimeId: string, data: string) => {
     const id = String(runtimeId)
-    if (serial.has(id)) serial.write(id, String(data))
+    if (local.has(id)) local.write(id, String(data))
+    else if (serial.has(id)) serial.write(id, String(data))
     else ssh.write(id, String(data))
   })
   handle('ssh:resize', (runtimeId: string, cols: number, rows: number) => {
     const id = String(runtimeId)
-    if (serial.has(id)) serial.resize(id, Number(cols), Number(rows))
+    if (local.has(id)) local.resize(id, Number(cols), Number(rows))
+    else if (serial.has(id)) serial.resize(id, Number(cols), Number(rows))
     else ssh.resize(id, Number(cols), Number(rows))
   })
   handle('ssh:ack', (runtimeId: string, bytes: number) => {
     const id = String(runtimeId)
-    if (serial.has(id)) serial.ack(id, Number(bytes))
+    if (local.has(id)) local.ack(id, Number(bytes))
+    else if (serial.has(id)) serial.ack(id, Number(bytes))
     else ssh.ack(id, Number(bytes))
   })
   handle('ssh:hostKeyDecision', (requestId: string, accept: boolean) =>

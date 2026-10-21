@@ -44,6 +44,7 @@ function Welcome(): ReactElement {
   const sessions = useApp((state) => state.sessions)
   const openSession = useApp((state) => state.openSession)
   const openSessionDialog = useApp((state) => state.openSessionDialog)
+  const openLocalShell = useApp((state) => state.openLocalShell)
 
   return (
     <div className="welcome">
@@ -57,6 +58,10 @@ function Welcome(): ReactElement {
         <button className="btn btn-primary" onClick={() => openSessionDialog(null)}>
           <Icon name="plus" size={15} />
           {tr('新建会话', 'New session')}
+        </button>
+        <button className="btn" onClick={() => openLocalShell()}>
+          <Icon name="terminal" size={15} />
+          {tr('本地终端', 'Local terminal')}
         </button>
         {sessions[0] ? (
           <button className="btn" onClick={() => openSession(sessions[0])}>
@@ -430,7 +435,9 @@ export function TerminalArea(): ReactElement {
                         <TerminalPane
                           runtimeId={pane.runtimeId}
                           session={
-                            sessions.find((item) => item.id === pane.sessionId) ?? tab.session
+                            sessions.find((item) => item.id === pane.sessionId) ??
+                            tab.paneSessions?.[pane.sessionId] ??
+                            tab.session
                           }
                           visible={tab.id === activeTabId}
                           showClose={tab.panes.length > 1}

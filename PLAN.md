@@ -4,10 +4,11 @@
 >
 > 项目根目录：`/home/tsinghua/hshell`
 > 产品名：**HShell**（包名 `hshell`）
-> 文档版本：v1.1（2026-10-17）
+> 文档版本：v1.2（2026-10-21）
 >
-> **当前状态**：已实现可运行的 Xshell 风格 UI 与核心链路（多标签终端、会话管理器、
-> SFTP 面板、分屏、快捷键、真实 SSH 连接）。详见第 12 节「当前实现状态」。
+> **当前状态**：已实现可运行的 Xshell 风格 UI 与核心链路（多标签终端、串口、本机
+> 终端、会话管理器、SFTP 面板、分屏、快捷键、真实 SSH 连接）。详见第 12 节
+> 「当前实现状态」。
 
 ---
 
@@ -39,6 +40,7 @@
 | UI | React 19 + zustand 5 | 组件生态、状态简单可控 |
 | 终端 | `@xterm/xterm` 6 + addon-fit / search / unicode11 / webgl | 事实标准，性能与兼容性最好 |
 | SSH | `ssh2` 1.17（纯 JS） | 覆盖 PTY shell、SFTP、`forwardOut`/`forwardIn`，无需原生模块 |
+| 本机终端 | `node-pty` 1.2（N-API 预编译） | Unix PTY / Windows ConPTY，Electron 下无需重编译 |
 | 分屏 | 自绘嵌套布局树（终端） + `react-resizable-panels`（侧栏 / SFTP） | 终端面板绝对定位、不重建；侧栏复用现成可拖拽面板 |
 | 校验 | zod 4 | IPC / 导入导出 / 存储 schema |
 | 测试 | Vitest + Playwright（可选） | 核心逻辑无需图形环境 |
@@ -656,6 +658,17 @@ mac:
   8ms 批量与 ack 背压，支持会话日志与 ZMODEM；标签栏、状态栏、侧栏显示
   `设备 · 波特率 8N1`。串口会话自动禁用 SFTP、端口转发与公钥安装。错误信息区分
   设备不存在、权限不足（含 Linux `dialout` 提示）、设备被占用与非法参数。
+- **本机终端**：标签栏右侧的 `+`（以及欢迎页「本地终端」）直接在当前窗口打开运行
+  本机默认 Shell 的标签，不弹出新建会话对话框；其他位置的 `+` 仍新建 SSH/串口会话。
+  主进程 `main/local/manager.ts` 通过 `node-pty` 启动 `$SHELL -l`（Windows 为
+  `%COMSPEC%`，回退 `cmd.exe`），复用 `ssh:*` runtime 通道、8ms 批量与 2MB/512KB
+  ack 背压，支持写入、resize 与断开；Shell 自行退出时上报退出码/信号。本地标签名
+  自动编号（「本地终端 2」…），会话只存在于对应的标签内（`TabState.paneSessions`），
+  不写入 `sessions.json`，也不参与布局恢复。分屏、拖拽分屏、搜索、ZMODEM、日志与
+  录制均可用；SFTP、端口转发、跳板机与安装公钥按非 SSH 会话禁用。录制回放脚本
+  使用 `node-pty` 重放本机 Shell。`node-pty@1.2.0-beta.15` 为 N-API 预编译绑定，
+  所有平台预编译文件随包发布并 `asarUnpack`，可从 Linux 交叉构建 Windows 产物。
+  无头 E2E（`npm run e2e:local`）验证欢迎页入口、标签栏 `+`、编号与命令执行。
 - **会话**：本地 JSON 持久化（临时文件 + fsync + rename、`.bak`、损坏隔离）、
   schema v2 迁移、分组环检测、CRUD、快速连接（`user@host:port`）、会话属性对话框；
   导出 / 导入 JSON 会话包（默认不含密钥，可选口令加密私钥）；`~/.ssh/config`
@@ -893,6 +906,7 @@ mac:
 - [x] P12 自动化与外观（自动隐藏 / 快速命令栏 / 触发器 / 撰写窗格 / 脚本录制 /
   配色方案与突出显示集）
 - [x] P13 会话密码保存（可选加密保存 / 重启自动复用 / 凭据随会话清理）
+- [x] P14 本机终端（标签栏 `+` 直接打开 / `node-pty` PTY / 分屏与录制 / 打包绑定）
 
 ### 实现备注
 
@@ -994,6 +1008,16 @@ mac:
   往返、换机失败、safeStorage 优先级与 0600 权限；端到端测试使用只接受指定密码的
   mock sshd，验证保存后重启可直接连接；对话框级 UI 检查（无头 Electron + CDP）
   确认「保存密码」勾选与保存链路。
+- P14 完成（本机终端）：`main/local/manager.ts` 用 `node-pty` 启动系统默认 Shell，
+  复用 `ssh:*` 事件与背压通道；`ConnectionType` 新增 `local`，`isLocalSession` /
+  `isNonSshSession` 统一判定，SFTP、隧道、跳板机、公钥安装与「编辑会话」对本地
+  会话禁用。渲染端新增 `TabState.paneSessions` 保存未落盘的快速连接/本地会话，
+  `paneSession` / `sessionForRuntime` 在分屏、合并与状态栏中按 pane 解析会话。
+  标签栏 `+` 与欢迎页按钮调用 `openLocalShell()`，标签名自动编号。顺带修复启动
+  竞态：`init()` 加载会话/布局期间打开的标签不再被恢复结果覆盖。录制器新增
+  `node-pty` 回放分支。打包排除 node-pty 源码/调试文件并 `asarUnpack` 全部平台
+  prebuilds。新增 8 个单测/集成测试（PTY 输出、resize、退出码、手动关闭、默认
+  Shell 解析、标题编号）与 `npm run e2e:local` 无头 E2E。
 - P9 完成（Linux）：`build/icon.{png,ico,icns}` 与 `build/icons/` 由 `scripts/gen-icon.py`
   生成，deb 安装 9 种 hicolor 尺寸。`electron-builder.yml` 增加 `electronFuses`
   （RunAsNode=false、Cookie 加密开启、NODE_OPTIONS/inspect 关闭、OnlyLoadAppFromAsar）

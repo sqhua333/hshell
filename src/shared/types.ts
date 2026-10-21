@@ -83,7 +83,8 @@ export interface LoggingOptions {
   timestamps?: boolean
 }
 
-export type ConnectionType = 'ssh' | 'serial'
+/** `local` runs the current system's default shell in an embedded PTY. */
+export type ConnectionType = 'ssh' | 'serial' | 'local'
 
 export type SerialParity = 'none' | 'even' | 'odd' | 'mark' | 'space'
 export type SerialFlowControl = 'none' | 'rtscts' | 'xonxoff'

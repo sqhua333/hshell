@@ -14,9 +14,11 @@ import type {
   ZmodemPhase,
   ZmodemStatusEvent
 } from '@shared/types'
+import { isLocalSession } from '@shared/session'
 import { api } from './api'
 import { applyLocale, getLocale, tr, type Locale } from './lib/i18n'
 import { buildLayout, restoreLayout } from './lib/layout'
+import { localShellTitle } from './lib/local-session'
 import {
   collectPanes,
   paneNode,
@@ -46,6 +48,12 @@ export type { LayoutNode, PaneNode, PaneState, SplitNode } from './lib/pane-layo
 export interface TabState {
   id: string
   session: Session
+  /**
+   * Sessions that are not in the persisted `sessions` list (quick connects and
+   * local shells), keyed by session id. Split panes and tabs merged from
+   * another tab use this to resolve their own session.
+   */
+  paneSessions?: Record<string, Session>
   /** Flattened panes in layout order (kept in sync with `layout`). */
   panes: PaneState[]
   layout: LayoutNode
@@ -149,6 +157,8 @@ interface AppState {
   init(): Promise<void>
   reloadSessions(): Promise<void>
   openSession(session: Session): void
+  /** Open the current system's default shell in a new tab. */
+  openLocalShell(): void
   closeTab(tabId: string): void
   activateTab(tabId: string): void
   nextTab(delta: number): void
@@ -300,11 +310,29 @@ function writeQuickCommands(list: QuickCommand[]): void {
   }
 }
 
-function sessionForRuntime(runtimeId: string, state: AppState): Session | null {
+/** Resolve a pane's session, including quick connects and local shells. */
+export function paneSession(
+  sessionId: string,
+  tab: TabState,
+  sessions: Session[]
+): Session {
+  return (
+    sessions.find((item) => item.id === sessionId) ??
+    tab.paneSessions?.[sessionId] ??
+    tab.session
+  )
+}
+
+export function sessionForRuntime(
+  runtimeId: string | null,
+  state: AppState
+): Session | null {
+  if (!runtimeId) return null
   const tab = state.tabs.find((item) => item.panes.some((pane) => pane.runtimeId === runtimeId))
   if (!tab) return null
   const pane = tab.panes.find((item) => item.runtimeId === runtimeId)
-  return state.sessions.find((item) => item.id === pane?.sessionId) ?? tab.session
+  if (!pane) return null
+  return paneSession(pane.sessionId, tab, state.sessions)
 }
 
 const HOME_SESSION_ID = 's-local'
@@ -421,6 +449,13 @@ export const useApp = create<AppState>((set, get) => ({
     for (const tab of tabs) {
       for (const pane of tab.panes) statuses[pane.runtimeId] = { status: 'idle' }
     }
+    // A tab can be opened from the welcome screen while sessions and layouts
+    // are still loading. Keep those instead of replacing the whole tab list
+    // with the restored layout.
+    const live = get()
+    const liveTabs = live.tabs
+    const liveActive = liveTabs.some((tab) => tab.id === live.activeTabId)
+    const allTabs = [...tabs, ...liveTabs]
 
     // Quick commands used to live inside each session. On first launch after
     // the upgrade, adopt them into the global list instead of dropping them.
@@ -441,10 +476,12 @@ export const useApp = create<AppState>((set, get) => ({
       defaultUsername: info.username || 'root',
       folders: data.folders,
       sessions: data.sessions,
-      tabs,
-      activeTabId: activeTab?.id ?? null,
-      activeRuntimeId: activeTab?.panes[0]?.runtimeId ?? null,
-      statuses,
+      tabs: allTabs,
+      activeTabId: liveActive ? live.activeTabId : activeTab?.id ?? null,
+      activeRuntimeId: liveActive
+        ? live.activeRuntimeId
+        : activeTab?.panes[0]?.runtimeId ?? null,
+      statuses: { ...statuses, ...live.statuses },
       lastSessionId: data.sessions.some((s) => s.id === HOME_SESSION_ID)
         ? HOME_SESSION_ID
         : data.sessions[0]?.id ?? null
@@ -466,6 +503,7 @@ export const useApp = create<AppState>((set, get) => ({
     const tab: TabState = {
       id: uid('tab'),
       session: { ...session, auth: { ...session.auth } },
+      paneSessions: { [session.id]: { ...session, auth: { ...session.auth } } },
       panes: [pane],
       layout: paneNode(pane)
     }
@@ -476,6 +514,53 @@ export const useApp = create<AppState>((set, get) => ({
       lastSessionId: session.id,
       statuses: { ...state.statuses, [pane.runtimeId]: { status: 'connecting' } }
     }))
+    scheduleLayoutSave(get)
+  },
+
+  openLocalShell() {
+    const state = get()
+    const now = Date.now()
+    const existing = state.tabs.flatMap((tab) => [
+      ...(isLocalSession(tab.session) ? [tab.session.name] : []),
+      ...Object.values(tab.paneSessions ?? {})
+        .filter((item) => isLocalSession(item))
+        .map((item) => item.name)
+    ])
+    const session: Session = {
+      id: uid('local'),
+      name: localShellTitle(tr('本地终端', 'Local shell'), existing),
+      folderId: null,
+      // A local shell has no host; these fields satisfy the shared session
+      // shape and are never used by the local backend.
+      host: 'localhost',
+      port: 1,
+      username: state.defaultUsername,
+      auth: { method: 'agent' },
+      terminal: { term: 'xterm-256color', theme: 'dark', fontSize: state.fontSize },
+      connectionType: 'local',
+      createdAt: now,
+      updatedAt: now
+    }
+    const pane: PaneState = {
+      id: uid('pane'),
+      runtimeId: uid('rt'),
+      sessionId: session.id,
+      autoConnect: true
+    }
+    const tab: TabState = {
+      id: uid('tab'),
+      session,
+      paneSessions: { [session.id]: session },
+      panes: [pane],
+      layout: paneNode(pane)
+    }
+    set((current) => ({
+      tabs: [...current.tabs, tab],
+      activeTabId: tab.id,
+      activeRuntimeId: pane.runtimeId,
+      statuses: { ...current.statuses, [pane.runtimeId]: { status: 'connecting' } }
+    }))
+    // Local shells are not saved sessions; layout restore prunes their panes.
     scheduleLayoutSave(get)
   },
 
@@ -555,7 +640,9 @@ export const useApp = create<AppState>((set, get) => ({
   splitPaneWithSession(tabId, targetPaneId, sessionId, direction, side = 'after') {
     const state = get()
     const tab = state.tabs.find((item) => item.id === tabId)
-    const session = state.sessions.find((item) => item.id === sessionId)
+    const session =
+      state.sessions.find((item) => item.id === sessionId) ??
+      tab?.paneSessions?.[sessionId]
     if (!tab || !session) return
     const pane: PaneState = {
       id: uid('pane'),
@@ -610,11 +697,22 @@ export const useApp = create<AppState>((set, get) => ({
     const statuses = { ...state.statuses }
     for (const pane of movedPanes) statuses[pane.runtimeId] = { status: 'connecting' }
 
+    // Keep non-persisted sessions (quick connects, local shells) reachable from
+    // the panes that were just merged into the target tab.
+    const paneSessions = { ...target.paneSessions }
+    for (const pane of source.panes) {
+      const session = paneSession(pane.sessionId, source, state.sessions)
+      paneSessions[session.id] = session
+    }
+    paneSessions[source.session.id] = source.session
+
     set({
       tabs: state.tabs
         .filter((item) => item.id !== source.id)
         .map((item) =>
-          item.id === target.id ? { ...item, layout, panes: collectPanes(layout) } : item
+          item.id === target.id
+            ? { ...item, layout, panes: collectPanes(layout), paneSessions }
+            : item
         ),
       activeTabId: target.id,
       activeRuntimeId: movedPanes[0]?.runtimeId ?? state.activeRuntimeId,

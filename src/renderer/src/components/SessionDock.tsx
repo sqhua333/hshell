@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react'
+import { isLocalSession } from '@shared/session'
 import { api } from '../api'
 import { tr } from '../lib/i18n'
 import { recorder } from '../lib/recorder'
@@ -31,7 +32,9 @@ export function SessionDock({ tab, activeRuntimeId, visible }: SessionDockProps)
   const [sendEnter, setSendEnter] = useState(true)
 
   const session =
-    sessions.find((item) => item.id === tab.panes[0]?.sessionId) ?? tab.session
+    sessions.find((item) => item.id === tab.panes[0]?.sessionId) ??
+    (tab.panes[0] ? tab.paneSessions?.[tab.panes[0].sessionId] : undefined) ??
+    tab.session
   const runtimeId =
     tab.panes.find((pane) => pane.runtimeId === activeRuntimeId)?.runtimeId ??
     tab.panes[0]?.runtimeId ??
@@ -194,13 +197,15 @@ export function SessionDock({ tab, activeRuntimeId, visible }: SessionDockProps)
           >
             <Icon name="compose" size={13} />
           </button>
-          <button
-            className="icon-btn mini"
-            title={tr('会话自动化设置', 'Session automation settings')}
-            onClick={() => openSessionDialog(session, session.folderId, 'automation')}
-          >
-            <Icon name="settings" size={13} />
-          </button>
+          {isLocalSession(session) ? null : (
+            <button
+              className="icon-btn mini"
+              title={tr('会话自动化设置', 'Session automation settings')}
+              onClick={() => openSessionDialog(session, session.folderId, 'automation')}
+            >
+              <Icon name="settings" size={13} />
+            </button>
+          )}
         </div>
       </div>
     </div>

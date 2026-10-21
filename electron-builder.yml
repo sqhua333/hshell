@@ -15,6 +15,11 @@ files:
   - '!node_modules/ssh2/util/**'
   - '!node_modules/**/{test,tests,example,examples,doc,docs}/**'
   - '!node_modules/**/*.{md,map,ts}'
+  # node-pty only needs its prebuilds at runtime; sources, install scripts,
+  # debug symbols and the ConPTY copy kept for compiling add tens of megabytes.
+  - '!node_modules/node-pty/{src,scripts,third_party}/**'
+  - '!node_modules/node-pty/build/**'
+  - '!node_modules/node-pty/**/*.pdb'
 asar: true
 # The window/taskbar icon is loaded from disk at runtime, so ship it outside
 # the ASAR archive.
@@ -24,6 +29,9 @@ extraResources:
 # N-API prebuilds cannot be dlopen'ed from inside an ASAR archive.
 asarUnpack:
   - node_modules/@serialport/bindings-cpp/prebuilds/**
+  # All platforms' prebuilds ship in node-pty, so Windows artifacts built on
+  # Linux include a working ConPTY binary. They must live outside the ASAR.
+  - node_modules/node-pty/prebuilds/**
 npmRebuild: false
 electronLanguages:
   - en-US

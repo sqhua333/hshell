@@ -117,6 +117,20 @@ describe('generateReplayScript', () => {
     expect(script).not.toContain('ssh2')
   })
 
+  it('emits a local PTY replay for local shells', () => {
+    const script = generateReplayScript(
+      recordingFor(
+        makeSession({ name: '本地终端', connectionType: 'local' }),
+        [{ at: 100, direction: 'in', data: 'pwd\r' }]
+      )
+    )
+    expect(script).toContain('import * as pty from "node-pty"')
+    expect(script).toContain('term.write(step.data)')
+    expect(script).toContain('Session: 本地终端 (本地终端)')
+    expect(script).not.toContain('ssh2')
+    expect(script).not.toContain('SerialPort')
+  })
+
   it('generates syntactically valid ES modules', () => {
     const ssh = generateReplayScript(recordingFor(makeSession()))
     const serial = generateReplayScript(
@@ -134,9 +148,12 @@ describe('generateReplayScript', () => {
         })
       )
     )
+    const local = generateReplayScript(
+      recordingFor(makeSession({ name: '本地终端', connectionType: 'local' }))
+    )
     const dir = mkdtempSync(join(tmpdir(), 'hshell-script-'))
     try {
-      for (const [index, script] of [ssh, serial].entries()) {
+      for (const [index, script] of [ssh, serial, local].entries()) {
         const file = join(dir, `replay-${index}.mjs`)
         writeFileSync(file, script)
         execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' })

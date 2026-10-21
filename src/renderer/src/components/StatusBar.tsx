@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactElement } from 'react'
 import { sessionTarget } from '@shared/session'
 import { api, isElectron } from '../api'
 import { tr } from '../lib/i18n'
-import { useApp } from '../store'
+import { sessionForRuntime, useApp } from '../store'
 
 function statusText(status: string): string {
   switch (status) {
@@ -24,7 +24,7 @@ function statusText(status: string): string {
 }
 
 export function StatusBar(): ReactElement {
-  const tab = useApp((state) => state.tabs.find((item) => item.id === state.activeTabId))
+  const session = useApp((state) => sessionForRuntime(state.activeRuntimeId, state))
   const status = useApp((state) =>
     state.activeRuntimeId ? state.statuses[state.activeRuntimeId] : undefined
   )
@@ -38,7 +38,6 @@ export function StatusBar(): ReactElement {
   const recordingStartedAt = useApp((state) => state.recordingStartedAt)
   const stopRecording = useApp((state) => state.stopRecording)
   const [clock, setClock] = useState(Date.now())
-  const session = tab?.session
 
   useEffect(() => {
     if (!recordingStartedAt) return

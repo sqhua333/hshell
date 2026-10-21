@@ -74,7 +74,7 @@ export const sessionSchema = z.object({
   username: z.string().min(1).max(255),
   auth: authSchema,
   terminal: terminalOptionsSchema,
-  connectionType: z.enum(['ssh', 'serial']).optional(),
+  connectionType: z.enum(['ssh', 'serial', 'local']).optional(),
   serial: serialOptionsSchema.optional(),
   proxyJump: z.string().max(1024).nullable().optional(),
   jumpHosts: z.array(jumpHostSchema).max(8).optional(),

@@ -5,7 +5,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { WebglAddon } from '@xterm/addon-webgl'
 import type { Session, TriggerRule } from '@shared/types'
-import { isSerialSession, sessionTarget } from '@shared/session'
+import { isLocalSession, isSerialSession, sessionTarget } from '@shared/session'
 import { api } from '../api'
 import { resolveColorScheme } from '../lib/color-schemes'
 import { tr } from '../lib/i18n'
@@ -469,10 +469,15 @@ export function TerminalPane({
       (previous === 'connected' || previous === 'reconnecting')
     ) {
       notice(
-        tr(
-          `连接已断开${statusMessage ? `：${statusMessage}` : ''}`,
-          `Disconnected${statusMessage ? `: ${statusMessage}` : ''}`
-        )
+        isLocalSession(sessionRef.current)
+          ? tr(
+              `本地终端已退出${statusMessage ? `：${statusMessage}` : ''}`,
+              `Local shell exited${statusMessage ? `: ${statusMessage}` : ''}`
+            )
+          : tr(
+              `连接已断开${statusMessage ? `：${statusMessage}` : ''}`,
+              `Disconnected${statusMessage ? `: ${statusMessage}` : ''}`
+            )
       )
       notice(
         tr(
@@ -482,10 +487,15 @@ export function TerminalPane({
       )
     } else if (connectionStatus === 'failed' && previous !== 'failed') {
       notice(
-        tr(
-          `连接失败${statusMessage ? `：${statusMessage}` : ''}`,
-          `Connection failed${statusMessage ? `: ${statusMessage}` : ''}`
-        ),
+        isLocalSession(sessionRef.current)
+          ? tr(
+              `本地终端启动失败${statusMessage ? `：${statusMessage}` : ''}`,
+              `Could not start the local shell${statusMessage ? `: ${statusMessage}` : ''}`
+            )
+          : tr(
+              `连接失败${statusMessage ? `：${statusMessage}` : ''}`,
+              `Connection failed${statusMessage ? `: ${statusMessage}` : ''}`
+            ),
         31
       )
       notice(tr('按 Ctrl+Shift+R 重试。', 'Press Ctrl+Shift+R to retry.'), 31)
@@ -668,9 +678,13 @@ export function TerminalPane({
 
       {currentStatus === 'closed' ? (
         <div className="terminal-status-pill closed">
-          <span>{tr('连接已断开', 'Disconnected')}</span>
+          <span>
+            {isLocalSession(session)
+              ? tr('本地终端已退出', 'Local shell exited')
+              : tr('连接已断开', 'Disconnected')}
+          </span>
           <button className="pill-btn" onClick={retry}>
-            {tr('重新连接', 'Reconnect')}
+            {isLocalSession(session) ? tr('重新启动', 'Restart') : tr('重新连接', 'Reconnect')}
           </button>
         </div>
       ) : null}
@@ -686,23 +700,27 @@ export function TerminalPane({
               {status?.message ||
                 (isSerialSession(session)
                   ? tr('无法打开串口设备', 'Could not open the serial device')
-                  : tr('无法建立 SSH 连接', 'Could not establish an SSH connection'))}
+                  : isLocalSession(session)
+                    ? tr('无法启动本地终端', 'Could not start the local shell')
+                    : tr('无法建立 SSH 连接', 'Could not establish an SSH connection'))}
             </p>
           </div>
           <div className="terminal-error-actions">
             <button className="btn btn-primary" onClick={retry}>
               {tr('重试', 'Retry')}
             </button>
-            <button
-              className="btn"
-              onClick={() =>
-                openSessionDialog(
-                  useApp.getState().sessions.find((item) => item.id === session.id) ?? session
-                )
-              }
-            >
-              {tr('编辑会话', 'Edit session')}
-            </button>
+            {isLocalSession(session) ? null : (
+              <button
+                className="btn"
+                onClick={() =>
+                  openSessionDialog(
+                    useApp.getState().sessions.find((item) => item.id === session.id) ?? session
+                  )
+                }
+              >
+                {tr('编辑会话', 'Edit session')}
+              </button>
+            )}
           </div>
         </div>
       ) : null}

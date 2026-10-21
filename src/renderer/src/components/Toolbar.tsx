@@ -1,9 +1,9 @@
 import { useState, type ReactElement } from 'react'
-import { isSerialSession } from '@shared/session'
+import { isNonSshSession } from '@shared/session'
 import { isElectron } from '../api'
 import { quickConnect, runAction } from '../commands'
 import { tr } from '../lib/i18n'
-import { useApp } from '../store'
+import { sessionForRuntime, useApp } from '../store'
 import { Icon } from './Icon'
 
 export function Toolbar(): ReactElement {
@@ -22,8 +22,8 @@ export function Toolbar(): ReactElement {
   const status = useApp((state) =>
     state.activeRuntimeId ? state.statuses[state.activeRuntimeId]?.status : undefined
   )
-  const serialActive = useApp((state) =>
-    isSerialSession(state.tabs.find((tab) => tab.id === state.activeTabId)?.session)
+  const nonSshActive = useApp((state) =>
+    isNonSshSession(sessionForRuntime(state.activeRuntimeId, state))
   )
   const [quick, setQuick] = useState('')
 
@@ -82,11 +82,11 @@ export function Toolbar(): ReactElement {
       <button
         className={`tool-btn ${sftpVisible ? 'active' : ''}`}
         title={
-          serialActive
-            ? tr('串口会话不支持 SFTP', 'SFTP is unavailable for serial sessions')
+          nonSshActive
+            ? tr('SFTP 需要 SSH 会话', 'SFTP requires an SSH session')
             : tr('SFTP 面板 (Ctrl+Shift+E)', 'SFTP panel (Ctrl+Shift+E)')
         }
-        disabled={serialActive}
+        disabled={nonSshActive}
         onClick={() => void runAction('view:sftp')}
       >
         <Icon name="upload" />
@@ -94,11 +94,11 @@ export function Toolbar(): ReactElement {
       <button
         className="tool-btn"
         title={
-          serialActive
-            ? tr('串口会话不支持端口转发', 'Port forwarding is unavailable for serial sessions')
+          nonSshActive
+            ? tr('端口转发需要 SSH 会话', 'Port forwarding requires an SSH session')
             : tr('端口转发', 'Port forwarding')
         }
-        disabled={serialActive}
+        disabled={nonSshActive}
         onClick={() => useApp.getState().setTunnelsOpen(true)}
       >
         <Icon name="link" />

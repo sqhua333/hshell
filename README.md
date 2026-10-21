@@ -1,8 +1,8 @@
 # HShell
 
-跨平台 SSH / 串口客户端。Electron + React + xterm.js + ssh2 / serialport，
+跨平台 SSH / 串口客户端。Electron + React + xterm.js + ssh2 / serialport / node-pty，
 支持多标签终端、会话管理、SFTP、ZMODEM（`rz`/`sz`）、密钥管理、分屏与布局恢复、
-会话日志、端口转发（`-L`/`-R`/`-D`）、串口控制台、中英文界面与快捷键。
+会话日志、端口转发（`-L`/`-R`/`-D`）、串口控制台、本机终端、中英文界面与快捷键。
 
 ## 快速开始
 
@@ -25,6 +25,7 @@ npm run e2e:timestamps                  # 终端时间戳栏 UI 检查（需先�
 npm run e2e:password                    # 终端内密码重试与加密保存检查（需先构建，无头运行）
 npm run e2e:clipboard                   # 终端复制/粘贴、右键与多行粘贴确认检查（需先构建，无头运行）
 npm run e2e:startup-theme               # 启动主题引导与无闪烁检查（需先构建，无头运行）
+npm run e2e:local                       # 本机终端与标签栏 + 按钮检查（需先构建，无头运行）
 ```
 
 如果环境里设置了 `ELECTRON_RUN_AS_NODE=1`（某些 IDE 会注入），启动 Electron 时使用：
@@ -79,6 +80,8 @@ npm run mock:sshd      # 127.0.0.1:2222
   导入导出菜单；可点击标题栏的图钉按钮自动隐藏为 14px 滑轨，悬停展开。拖动右边缘
   可调整宽度（180–520px），双击恢复默认的 252px。
 - **标签页**：多标签、状态圆点、中键关闭；分屏布局与面板尺寸在重启后自动恢复。
+  标签栏右侧的 `+` 直接打开一个**本机终端**（不弹新建会话对话框），其他位置的 `+`
+  仍用于新建 SSH/串口会话。
 - **分屏**：`Ctrl+Shift+S` / `Ctrl+Shift+D` 在当前标签内水平/垂直拆分。每次分屏只
   对半拆开**当前活动面板**，其他面板尺寸不变（例如 50/50 再拆得到 50/25/25）；在
   活动面板上换一个方向分屏会形成嵌套布局，周围面板的窗口大小保持原样。分隔条可
@@ -255,6 +258,24 @@ npm run mock:sshd      # 127.0.0.1:2222
 远端需要安装 `lrzsz`，例如 Ubuntu/Debian：`sudo apt-get install lrzsz`。
 传输期间当前终端会被协议占用，完成后恢复正常交互。
 
+## 本机终端
+
+点击标签栏右侧的 `+`，或在欢迎页点「本地终端」，即可在当前窗口内打开一个运行本机
+Shell 的终端标签（与 VS Code 的集成终端类似）：
+
+- 使用系统默认 Shell：Linux/macOS 读取 `$SHELL`（启动参数 `-l`，回退到
+  `/bin/zsh`、`/bin/bash` 或 `/bin/sh`），Windows 使用 `%COMSPEC%`（通常为
+  `cmd.exe`）；工作目录为当前用户主目录，终端类型为 `xterm-256color`。
+- 本机终端与 SSH/串口会话共享标签页、分屏、快捷键、搜索、快速命令、ZMODEM 与会话
+  日志；标签名默认为「本地终端」，再次打开会依次编号为「本地终端 2」「本地终端 3」。
+- 本机终端不写入会话列表，也不会在重启后恢复；关闭标签或点击断开即结束对应的
+  Shell 进程。
+- SFTP、端口转发、跳板机与「安装公钥」只适用于 SSH 会话，打开本机终端时这些按钮
+  会禁用并提示「需要 SSH 会话」。
+- 本地终端由 `node-pty` 提供真实的 PTY（Windows 下为 ConPTY），随应用一起打包了
+  Linux、macOS 与 Windows 的预编译文件；如果当前平台缺少可用的预编译绑定，打开时
+  会提示「无法加载本地终端组件」。
+
 ## 串口终端
 
 新建或编辑会话时，把「协议」切换为「串口」：
@@ -340,13 +361,16 @@ npm run dist:win:portable # 免安装单文件 exe（Linux 交叉构建无需 wi
 npm run dist:win:zip      # 免安装 zip（Linux 交叉构建无需 wine）
 npm run dist:mac        # dmg + zip（需要 macOS 主机）
 npm run smoke:packaged  # 无头启动 dist/linux-unpacked 并检查 preload 与界面
+node scripts/e2e-local-shell.mjs dist/linux-unpacked/hshell  # 在打包产物里验证本机终端
 npm run icon            # 重新生成 build/ 下的图标（需要 Pillow）
 ```
 
 产物写入 `dist/`。打包启用 ASAR 与 Electron fuses（禁用 `ELECTRON_RUN_AS_NODE`、
 `NODE_OPTIONS` 和调试参数，仅从 ASAR 加载应用），并排除 `cpu-features`、ssh2 的
-可选原生绑定与测试文件。串口使用的 `@serialport/bindings-cpp` N-API 预编译绑定保留在
-`app.asar.unpacked` 中，可直接在 Electron ABI 下加载，无需 `electron-rebuild`。
+可选原生绑定与测试文件。串口使用的 `@serialport/bindings-cpp` 与本机终端使用的
+`node-pty` 均为 N-API 预编译绑定，保留在 `app.asar.unpacked` 中，可直接在 Electron
+ABI 下加载，无需 `electron-rebuild`；`node-pty` 会同时打包各平台的预编译文件（含
+Windows 的 ConPTY），因此可以从 Linux 交叉构建 Windows 免安装版本。
 `.github/workflows/build.yml` 会在 Ubuntu、Windows 和 macOS 上分别产出安装包；
 Linux 本机构建 NSIS 需要额外安装 wine（electron-builder 会运行 32 位安装器以生成
 卸载程序，因此需要 wine32）。没有 wine 时可用 `dist:win:portable` 或 `dist:win:zip`
@@ -398,18 +422,23 @@ HSHELL_SOAK_FULL=1 npx vitest run tests/integration/sftp-transfer.test.ts -t 100
 ```
 
 两个用例均使用进程内 SSH 服务器，不会连接或修改真实的 `~/.ssh`。本机实测
-100MB 往返约 11 秒；默认套件 270 个测试通过（242 个单元 + 28 个集成），另有 5 个
-浸泡测试默认跳过。串口集成测试通过 `socat` 虚拟串口运行，未安装 `socat` 时自动跳过。
+100MB 往返约 11 秒；默认套件 280 个测试通过（246 个单元 + 34 个集成），另有 5 个
+浸泡测试默认跳过。串口集成测试通过 `socat` 虚拟串口运行，未安装 `socat` 时自动跳过；
+本机终端集成测试会真实启动 `/bin/sh`，在进程内断言输出、窗口尺寸与退出码。
 
 ## 已知限制
 
 - 认证支持密码、私钥、ssh-agent 与 keyboard-interactive；不支持 ProxyCommand、
   GSSAPI、OpenSSH 证书与 FIDO 密钥。
 - 端口转发支持 `-L` / `-R` / `-D`，不支持 Unix socket 转发。
-- 串口会话不支持 SFTP、端口转发与公钥安装；ZMODEM 以外的 XMODEM/YMODEM 协议未实现。
-  部分适配器或 PTY 不支持设置 DTR/RTS，此类错误会被忽略而不影响连接。
-- 生成的录制回放脚本需要自行安装 `ssh2` 或 `serialport`，并按脚本头部提示提供连接
-  凭据（脚本不保存密码/私钥）；录制期间键入的敏感内容会写入脚本，请妥善保管。
+- 串口会话与本机终端不支持 SFTP、端口转发、跳板机与公钥安装；ZMODEM 以外的
+  XMODEM/YMODEM 协议未实现。部分适配器或 PTY 不支持设置 DTR/RTS，此类错误会被忽略
+  而不影响连接。
+- 本机终端依赖操作系统的 PTY（Windows 为 ConPTY）与预编译的 `node-pty` 绑定；
+  不支持自定义启动命令，也不随布局恢复重新打开。
+- 生成的录制回放脚本需要自行安装 `ssh2`、`serialport` 或 `node-pty`（按会话类型），
+  并按脚本头部提示提供连接凭据（脚本不保存密码/私钥）；录制期间键入的敏感内容会
+  写入脚本，请妥善保管。
 - `keepaliveInterval=15s`、`keepaliveCountMax=3` 已启用，但 24 小时保活尚未实跑。
 - Windows NSIS 与 macOS dmg 由 CI 构建；Linux 本机交叉构建 NSIS 需要 wine。
 - 本地 SFTP 路径由渲染进程传入（已启用 contextIsolation/sandbox）；后续可改为
