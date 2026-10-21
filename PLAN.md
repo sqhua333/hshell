@@ -305,7 +305,7 @@ Ctrl+Shift+V / Shift+Insert 始终可用。
 | `Ctrl++` / `Ctrl+-` / `Ctrl+0` | 放大 / 缩小 / 重置终端字号 |
 | `Alt+Enter` / `F11` | 切换全屏 |
 | `F1` | 快捷键帮助对话框 |
-| `Esc` | 关闭当前对话框、查找栏或提示面板 |
+| `Esc` | 发送给终端程序（vi/vim 退出编辑模式）；对话框、查找栏或撰写窗格打开时关闭 |
 
 新增或调整快捷键时，必须同步修改：
 `src/renderer/src/lib/shortcuts.ts`（唯一注册表）、`src/main/menu.ts`（菜单加速键）、
@@ -1018,6 +1018,11 @@ mac:
   `node-pty` 回放分支。打包排除 node-pty 源码/调试文件并 `asarUnpack` 全部平台
   prebuilds。新增 8 个单测/集成测试（PTY 输出、resize、退出码、手动关闭、默认
   Shell 解析、标题编号）与 `npm run e2e:local` 无头 E2E。
+- 修复 Esc 被全局快捷键吞掉：`escape` 改为 `infoOnly`，不再进入全局组合键表，
+  `TerminalPane` 因而把 Esc 作为 `\x1b` 发给 PTY，vi/vim 可正常退出插入模式。
+  对话框、查找栏与撰写窗格继续由各自的按键处理器关闭；连接失败面板在终端聚焦时
+  仍由 App 的专用 Esc 处理器关闭，通知提示仅在焦点不在终端时响应 Esc。单测断言
+  `matchShortcut(Escape) === null`，本地终端 E2E 通过 `cat -v` 断言 tty 收到 `^[`。
 - P9 完成（Linux）：`build/icon.{png,ico,icns}` 与 `build/icons/` 由 `scripts/gen-icon.py`
   生成，deb 安装 9 种 hicolor 尺寸。`electron-builder.yml` 增加 `electronFuses`
   （RunAsNode=false、Cookie 加密开启、NODE_OPTIONS/inspect 关闭、OnlyLoadAppFromAsar）

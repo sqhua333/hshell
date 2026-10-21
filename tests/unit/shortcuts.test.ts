@@ -29,4 +29,10 @@ describe('terminal clipboard shortcuts', () => {
     expect(matchShortcut(key('Insert', { ctrlKey: true }))?.action).toBe('edit:copy')
     expect(matchShortcut(key('Insert', { shiftKey: true }))?.action).toBe('edit:paste')
   })
+
+  it('leaves Escape to the terminal so vi can leave insert mode', () => {
+    // Registering Escape globally would stop xterm from sending \x1b to the
+    // shell; dialogs handle it themselves.
+    expect(matchShortcut(key('Escape'))).toBeNull()
+  })
 })

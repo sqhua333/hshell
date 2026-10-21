@@ -169,6 +169,36 @@ export default function App(): ReactElement {
     return () => window.removeEventListener('keydown', handler, true)
   }, [])
 
+  useEffect(() => {
+    // Escape is terminal input, not a global shortcut: vi/vim must receive it
+    // to leave insert mode. Dialogs and inputs close it in their own handlers;
+    // only the connection-failure panel swallows it while the terminal is
+    // focused, because that terminal can no longer run a program.
+    const handler = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      const state = useApp.getState()
+      const failedId = state.activeRuntimeId
+      if (
+        failedId &&
+        state.statuses[failedId]?.status === 'failed' &&
+        !state.failedDismissed[failedId]
+      ) {
+        event.preventDefault()
+        state.dismissFailure(failedId)
+        return
+      }
+      const target = event.target
+      const inTerminal = target instanceof HTMLElement && target.closest('.xterm') !== null
+      if (inTerminal || event.defaultPrevented) return
+      if (state.toasts.length > 0) {
+        event.preventDefault()
+        state.removeToast(state.toasts[state.toasts.length - 1].id)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
   return (
     <div className="app" data-theme={uiTheme}>
       <Toolbar />

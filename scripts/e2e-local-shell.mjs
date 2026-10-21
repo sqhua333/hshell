@@ -142,17 +142,35 @@ async function typeText(text) {
   await send('Input.insertText', { text })
 }
 
-async function pressEnter() {
+async function pressKey(key, code, virtualKeyCode, modifiers = 0) {
   const base = {
+    key,
+    code,
+    windowsVirtualKeyCode: virtualKeyCode,
+    nativeVirtualKeyCode: virtualKeyCode,
+    modifiers
+  }
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', ...base })
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', ...base })
+}
+
+async function pressEnter() {
+  await send('Input.dispatchKeyEvent', {
+    type: 'keyDown',
     key: 'Enter',
     code: 'Enter',
     windowsVirtualKeyCode: 13,
     nativeVirtualKeyCode: 13,
     text: '\r',
     unmodifiedText: '\r'
-  }
-  await send('Input.dispatchKeyEvent', { type: 'keyDown', ...base })
-  await send('Input.dispatchKeyEvent', { type: 'keyUp', ...base })
+  })
+  await send('Input.dispatchKeyEvent', {
+    type: 'keyUp',
+    key: 'Enter',
+    code: 'Enter',
+    windowsVirtualKeyCode: 13,
+    nativeVirtualKeyCode: 13
+  })
 }
 
 const ui = (body) => `(async () => {
@@ -252,6 +270,24 @@ try {
     fail('status bar does not report the local shell as connected', firstOutput)
   }
   console.log('LOCAL_SHELL_COMMAND_OK')
+
+  // The tty echoes a delivered Esc as ^[, proving vi/vim can leave insert mode.
+  await typeText('cat -v')
+  await pressEnter()
+  await typeText('abc')
+  await pressKey('Escape', 'Escape', 27)
+  await typeText('def')
+  await pressEnter()
+  const escaped = await evaluate(
+    ui(`
+      await waitFor(() => terminalText().includes('abc^[def'), 'Escape byte')
+      return terminalText()
+    `)
+  )
+  if (!escaped.includes('abc^[def')) fail('Escape did not reach the shell', { escaped })
+  await pressKey('c', 'KeyC', 67, 2) // Ctrl+C leaves cat
+  await evaluate(ui(`await sleep(300); return true`))
+  console.log('ESCAPE_KEY_OK')
 
   // 2. The tab bar + opens a second local shell, not the session dialog.
   const second = await evaluate(
