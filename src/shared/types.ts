@@ -402,6 +402,8 @@ export interface HshellApi {
      * matches the saved theme.
      */
     readonly initialTheme: 'light' | 'dark' | null
+    /** `process.platform`; used to choose terminal clipboard shortcuts. */
+    readonly platform: string
     info(): Promise<AppInfo>
     setLocale(locale: Language): Promise<void>
     /** Mirror the UI theme so the next window opens without a color flash. */

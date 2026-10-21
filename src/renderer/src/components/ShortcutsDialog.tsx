@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react'
+import { api } from '../api'
 import { tr } from '../lib/i18n'
 import { SHORTCUT_GROUPS } from '../lib/shortcuts'
 import { useApp } from '../store'
@@ -9,6 +10,9 @@ export function ShortcutsDialog(): ReactElement | null {
   const setOpen = useApp((state) => state.setShortcutsHelp)
   const locale = useApp((state) => state.locale)
   if (!open) return null
+  const isMac = api.app.platform === 'darwin'
+  const copyKey = isMac ? 'Cmd+C' : 'Ctrl+C'
+  const shiftCopyKey = isMac ? 'Cmd+Shift+C' : 'Ctrl+Shift+C'
 
   return (
     <Modal
@@ -31,7 +35,7 @@ export function ShortcutsDialog(): ReactElement | null {
             {group.items.map((item) => (
               <div className="shortcut-row" key={`${item.action}-${item.combo}`}>
                 <span>{locale === 'en' ? item.labelEn : item.label}</span>
-                <kbd>{item.display}</kbd>
+                <kbd>{isMac && item.displayMac ? item.displayMac : item.display}</kbd>
               </div>
             ))}
           </section>
@@ -39,8 +43,8 @@ export function ShortcutsDialog(): ReactElement | null {
       </div>
       <div className="form-hint">
         {tr(
-          '提示：终端中 Ctrl+C 仍然发送中断信号；复制请使用 Ctrl+Shift+C 或 Ctrl+Insert。',
-          'Tip: Ctrl+C still sends SIGINT in the terminal; use Ctrl+Shift+C or Ctrl+Insert to copy.'
+          `提示：终端中选中文本后 ${copyKey} 复制，未选中时 Ctrl+C 发送中断；${shiftCopyKey} 始终复制。右键有选中内容时复制，无选中时打开菜单（Shift+右键始终打开菜单）。多行粘贴会先确认。`,
+          `Tip: ${copyKey} copies selected text in the terminal and Ctrl+C sends SIGINT when nothing is selected; ${shiftCopyKey} always copies. Right-click copies a selection or opens the menu (Shift+right-click always opens it). Multi-line pastes ask for confirmation.`
         )}
       </div>
     </Modal>

@@ -111,25 +111,13 @@ export async function runAction(action: ShortcutAction | string): Promise<void> 
       state.nextTab(-1)
       break
 
-    case 'edit:copy': {
-      const handle = getTerminal(state.activeRuntimeId)
-      const selection = handle?.terminal.getSelection()
-      if (selection) {
-        await api.clipboard.writeText(selection)
-        handle?.focus()
-      }
+    case 'edit:copy':
+      await state.copySelection(state.activeRuntimeId)
       break
-    }
 
-    case 'edit:paste': {
-      const text = await api.clipboard.readText()
-      const handle = getTerminal(state.activeRuntimeId)
-      if (text && handle) {
-        handle.terminal.paste(text)
-        handle.focus()
-      }
+    case 'edit:paste':
+      await state.pasteClipboard(state.activeRuntimeId)
       break
-    }
 
     case 'edit:find':
       state.setSearchVisible(!state.searchVisible)
@@ -201,7 +189,9 @@ export async function runAction(action: ShortcutAction | string): Promise<void> 
       break
 
     case 'dialog:close': {
-      if (state.keyboard) {
+      if (state.pasteConfirm) {
+        state.cancelPaste()
+      } else if (state.keyboard) {
         await api.ssh.keyboardInteractive(state.keyboard.requestId, undefined, true)
         state.setKeyboard(null)
       } else if (state.shortcutsHelp) {

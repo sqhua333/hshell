@@ -13,6 +13,7 @@ import { matchShortcut } from '../lib/shortcuts'
 import { findHighlightLines, OutputRuleEngine, stripAnsi } from '../lib/output-rules'
 import { handlePasswordKeys } from '../lib/password-input'
 import { recorder } from '../lib/recorder'
+import { resolveClipboardKey } from '../lib/terminal-clipboard'
 import { subscribeRuntimeData } from '../lib/runtime-bus'
 import { formatClock } from '../lib/terminal-stamps'
 import { registerTerminal } from '../lib/terminal-registry'
@@ -143,7 +144,10 @@ export function TerminalPane({
       scrollback: 8000,
       theme: resolveColorScheme(session.terminal.colorScheme, session.terminal.theme).theme,
       convertEol: false,
-      macOptionIsMeta: true
+      macOptionIsMeta: true,
+      // Right-click copies a selection or opens our menu; word selection
+      // would fight both behaviors.
+      rightClickSelectsWord: false
     })
     const fit = new FitAddon()
     const search = new SearchAddon()
@@ -335,8 +339,22 @@ export function TerminalPane({
     container.addEventListener('pointerdown', pointerHandler, true)
 
     term.attachCustomKeyEventHandler((event) => {
-      if (event.type === 'keydown' && matchShortcut(event)) return false
-      return true
+      if (event.type !== 'keydown') return true
+      if (matchShortcut(event)) return false
+      // While the inline password prompt is active, Ctrl+C must cancel it
+      // rather than copy whatever happens to be selected in the scrollback.
+      const passwordActive = passwordPromptRef.current?.runtimeId === runtimeId
+      const action = resolveClipboardKey(
+        event,
+        api.app.platform,
+        !passwordActive && term.hasSelection()
+      )
+      if (action === 'pass') return true
+      event.preventDefault()
+      const state = useApp.getState()
+      if (action === 'copy') void state.copySelection(runtimeId)
+      else void state.pasteClipboard(runtimeId)
+      return false
     })
 
     performFit()
@@ -543,23 +561,21 @@ export function TerminalPane({
       .catch((error) => setStatus(runtimeId, 'failed', (error as Error).message))
   }
 
+  const isMac = api.app.platform === 'darwin'
+  const hasSelection = Boolean(terminalRef.current?.hasSelection())
   const menuItems: ContextMenuItem[] = [
     {
       label: tr('复制', 'Copy'),
       icon: 'copy',
-      onClick: () => {
-        const selection = terminalRef.current?.getSelection()
-        if (selection) void api.clipboard.writeText(selection)
-      }
+      hint: isMac ? 'Cmd+C' : 'Ctrl+C',
+      disabled: !hasSelection,
+      onClick: () => void useApp.getState().copySelection(runtimeId)
     },
     {
       label: tr('粘贴', 'Paste'),
       icon: 'clipboard',
-      onClick: () => {
-        void api.clipboard.readText().then((text) => {
-          if (text) terminalRef.current?.paste(text)
-        })
-      }
+      hint: isMac ? 'Cmd+V' : 'Ctrl+V',
+      onClick: () => void useApp.getState().pasteClipboard(runtimeId)
     },
     {
       label: tr('全选', 'Select all'),
@@ -588,6 +604,13 @@ export function TerminalPane({
       }}
       onContextMenu={(event) => {
         event.preventDefault()
+        const term = terminalRef.current
+        // VS Code-style right click: copy the selection, or open the menu when
+        // there is none. Shift always opens the menu so paste stays reachable.
+        if (!event.shiftKey && term?.hasSelection()) {
+          void useApp.getState().copySelection(runtimeId)
+          return
+        }
         setMenu({ x: event.clientX, y: event.clientY })
       }}
     >

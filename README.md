@@ -23,6 +23,7 @@ npm run build
 npm run e2e:drag-split                  # 拖拽分屏 UI 检查（需先构建，无头运行）
 npm run e2e:timestamps                  # 终端时间戳栏 UI 检查（需先构建，无头运行）
 npm run e2e:password                    # 终端内密码重试与加密保存检查（需先构建，无头运行）
+npm run e2e:clipboard                   # 终端复制/粘贴、右键与多行粘贴确认检查（需先构建，无头运行）
 npm run e2e:startup-theme               # 启动主题引导与无闪烁检查（需先构建，无头运行）
 ```
 
@@ -305,8 +306,10 @@ picocom -b 115200 /tmp/ttyB       # 或 cat /tmp/ttyB / echo hello > /tmp/ttyB
 | Ctrl+N / Ctrl+T / Ctrl+W | 新建会话 / 新建标签 / 关闭当前分屏（无分屏时关闭标签） |
 | Ctrl+Tab / Ctrl+Shift+Tab | 切换标签 |
 | Alt+1…9 | 切到第 N 个标签 |
-| Ctrl+Shift+C / Ctrl+Insert | 复制 |
-| Ctrl+Shift+V / Shift+Insert | 粘贴 |
+| Ctrl+C | 有选中内容时复制，否则发送 SIGINT（macOS 为 Cmd+C 复制） |
+| Ctrl+V | 粘贴（macOS 为 Cmd+V）；多行内容会先确认 |
+| Ctrl+Shift+C / Ctrl+Insert | 始终复制选中内容 |
+| Ctrl+Shift+V / Shift+Insert | 始终粘贴 |
 | Ctrl+Shift+F | 查找 |
 | Ctrl+Shift+R / Ctrl+Shift+W | 重连 / 断开 |
 | Ctrl+Shift+S / Ctrl+Shift+D | 水平 / 垂直分屏 |
@@ -316,9 +319,16 @@ picocom -b 115200 /tmp/ttyB       # 或 cat /tmp/ttyB / echo hello > /tmp/ttyB
 | Ctrl++ / Ctrl+- / Ctrl+0 | 字号 |
 | F1 / Alt+Enter / F11 | 快捷键帮助 / 全屏 |
 
-终端里的 `Ctrl+C` 仍然发送 SIGINT。右上角的通知提示（包括连接失败）可点击关闭，
-也可以按 `Esc` 关闭当前提示；连接失败时终端内的错误面板同样可按 `Esc` 关闭，
-下次连接再次失败时会重新出现。有对话框或撰写窗格时 `Esc` 会优先关闭它们。
+终端复制/粘贴沿用 VS Code 终端的手感：有选中内容时 `Ctrl+C` 复制并清除选区，
+没有选中内容时照常发送 SIGINT；macOS 上 `Ctrl+C` 始终留给 shell，复制/粘贴使用
+`Cmd+C` / `Cmd+V`。右键有选中内容时直接复制、不弹菜单；没有选中内容时打开
+「复制 / 粘贴 / 全选 / 查找 / 清屏」菜单，按住 `Shift` 右键可随时强制打开菜单。
+剪贴板包含换行时会先弹出预览确认，避免一次粘贴执行多条命令；支持括号粘贴模式
+（bracketed paste）的程序不会询问。复制成功会显示短暂提示。
+
+右上角的通知提示（包括连接失败）可点击关闭，也可以按 `Esc` 关闭当前提示；
+连接失败时终端内的错误面板同样可按 `Esc` 关闭，下次连接再次失败时会重新出现。
+有对话框或撰写窗格时 `Esc` 会优先关闭它们。
 
 ## 打包分发
 
@@ -388,7 +398,7 @@ HSHELL_SOAK_FULL=1 npx vitest run tests/integration/sftp-transfer.test.ts -t 100
 ```
 
 两个用例均使用进程内 SSH 服务器，不会连接或修改真实的 `~/.ssh`。本机实测
-100MB 往返约 11 秒；默认套件 253 个测试通过（225 个单元 + 28 个集成），另有 5 个
+100MB 往返约 11 秒；默认套件 270 个测试通过（242 个单元 + 28 个集成），另有 5 个
 浸泡测试默认跳过。串口集成测试通过 `socat` 虚拟串口运行，未安装 `socat` 时自动跳过。
 
 ## 已知限制

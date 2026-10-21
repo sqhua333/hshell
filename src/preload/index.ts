@@ -25,6 +25,7 @@ function readInitialTheme(): 'light' | 'dark' | null {
 const api: HshellApi = {
   app: {
     initialTheme: readInitialTheme(),
+    platform: process.platform,
     info: () => ipcRenderer.invoke('app:info'),
     setLocale: (locale) => ipcRenderer.invoke('app:setLocale', locale),
     setTheme: (theme) => ipcRenderer.invoke('app:setTheme', theme)

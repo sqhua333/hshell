@@ -369,6 +369,10 @@ export function createMockApi(): HshellApi {
         localStorage.getItem('hshell.uiTheme') === 'dark'
           ? 'dark'
           : 'light',
+      platform:
+        typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
+          ? 'darwin'
+          : 'linux',
       setLocale: async () => undefined,
       setTheme: async () => undefined,
       info: async () => ({

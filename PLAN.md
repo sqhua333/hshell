@@ -273,8 +273,12 @@ PaneNode { type:'pane', sessionId }
 ### 5.6 键盘快捷键（Xshell 风格）
 
 所有快捷键统一由渲染进程的捕获阶段处理，并同步到原生菜单；xterm 通过
-`attachCustomKeyEventHandler` 让出这些组合键。**Ctrl+C 仍然发送 SIGINT**，复制使用
-Ctrl+Shift+C / Ctrl+Insert。
+`attachCustomKeyEventHandler` 让出这些组合键。终端复制/粘贴是上下文快捷键：
+Windows/Linux 下有选区时 Ctrl+C 复制并清除选区，无选区时仍发送 SIGINT；macOS 上
+Ctrl+C 始终留给 readline，复制/粘贴使用 Cmd+C / Cmd+V。右键有选区时直接复制、
+无选区时打开菜单（Shift+右键强制打开菜单）；多行粘贴在未启用括号粘贴
+（bracketed paste）时先显示预览确认。Ctrl+Shift+C / Ctrl+Insert 与
+Ctrl+Shift+V / Shift+Insert 始终可用。
 
 | 快捷键 | 功能 |
 |---|---|
@@ -284,8 +288,10 @@ Ctrl+Shift+C / Ctrl+Insert。
 | `Ctrl+W` | 关闭当前分屏（无分屏时关闭标签页） |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | 下一个 / 上一个标签页 |
 | `Alt+1 … Alt+9` | 切换到第 N 个标签页 |
-| `Ctrl+Shift+C` / `Ctrl+Insert` | 复制终端选中内容 |
-| `Ctrl+Shift+V` / `Shift+Insert` | 粘贴 |
+| `Ctrl+C` | 有选中内容时复制并清除选区；否则发送 SIGINT（macOS 为 `Cmd+C` 复制） |
+| `Ctrl+V` | 粘贴；多行内容先确认（macOS 为 `Cmd+V`） |
+| `Ctrl+Shift+C` / `Ctrl+Insert` | 始终复制终端选中内容 |
+| `Ctrl+Shift+V` / `Shift+Insert` | 始终粘贴 |
 | `Ctrl+Shift+F` | 在终端中查找 |
 | `Ctrl+Shift+K` | 清屏 |
 | `Ctrl+Shift+R` | 重新连接当前会话 |
@@ -630,7 +636,7 @@ mac:
 
 ---
 
-## 12. 当前实现状态（2026-10-20）
+## 12. 当前实现状态（2026-10-21）
 
 已完成并验证的 UI / 核心链路：
 
@@ -698,6 +704,13 @@ mac:
   `layouts.json`，同时兼容旧版平面布局；启动时恢复标签与分屏，已删除的会话会被
   跳过并折叠空 split。恢复的面板保持空闲状态并显示「已恢复上次布局 / 连接」按钮，
   避免重启时自动向所有主机发起连接。
+- **复制粘贴**：沿用 VS Code 终端的交互。Windows/Linux 下有选区时 Ctrl+C 复制
+  并清除选区，无选区时发送 SIGINT；macOS 上 Cmd+C / Cmd+V 负责剪贴板，Ctrl+C
+  始终留给 readline。右键有选区直接复制、无选区打开菜单（Shift+右键强制打开），
+  菜单中无选区时「复制」为禁用状态并显示快捷键提示。所有粘贴入口统一经过 store：
+  剪贴板为空或无终端时给出简短提示；多行文本在未启用 bracketed paste 时先显示
+  行数与预览对话框（默认焦点在「取消」），确认后才写入终端；支持的程序的括号
+  粘贴不打扰用户。复制成功后显示 1.6 秒的轻提示。
 - **终端时间戳**：会话属性 →「终端」可开启「在终端左侧显示每行时间戳」，按输出行在
   xterm 左侧的独立窄栏显示本地 `HH:mm:ss`。时间戳不在终端缓冲区中，复制、查找、
   突出显示与触发器均不受影响；开启后终端可用宽度相应缩小并由 `fit()` 重新计算列数。
@@ -790,7 +803,7 @@ mac:
   用户目录运行。NSIS 安装包在 Linux 上交叉构建需要 wine32（electron-builder
   需运行 32 位安装器生成卸载程序，本机未安装），macOS 产物需要 macOS 主机，二者由
   `.github/workflows/build.yml` 在 CI 中构建。
-- **验证**：`npm run typecheck` 通过；默认 253 个测试通过（225 个单元 + 28 个集成
+- **验证**：`npm run typecheck` 通过；默认 270 个测试通过（242 个单元 + 28 个集成
   测试；覆盖迁移、导出导入往返、文件夹环、ssh config、ZMODEM 双向协议与
   远端跳过/本地写入失败、串口 ANSI
   颜色透传、断线自动
@@ -807,7 +820,8 @@ mac:
   布局树构建恢复与旧平面格式兼容/损坏回退、i18n 切换、串口参数
   规范化与 socat 虚拟串口双向收发 / 日志 / ZMODEM / 错误提示、输出规则引擎与
   跨块匹配/冷却、录制器与回放脚本语法、配色方案解析、自动化 schema、
-  启动诊断文案与 ACL 修复命令、界面主题偏好读写（未设置/损坏/归一化）、
+  启动诊断文案与 ACL 修复命令、终端剪贴板按键判定/多行检测/预览截断、
+  界面主题偏好读写（未设置/损坏/归一化）、
   会话管理器宽度夹取、跳板机逐跳凭据恢复与
   密码落盘/导出脱敏、全局快速命令的归一/去重/上限/迁移、本地 SFTP 起始目录）。另有 5 个默认跳过
   的浸泡测试，用 `HSHELL_SOAK=1` /
@@ -846,6 +860,10 @@ mac:
   之前执行主题引导脚本；默认启动为浅色且 `ui-prefs.json` 写入 `light`；切换主题后
   DOM、localStorage 与 `ui-prefs.json` 均为 `dark`；清空 localStorage 后重启，仍由
   主进程传入的主题在首帧恢复深色（`data-theme-source` 为 `preload`）。
+  终端剪贴板专项检查由 `npm run e2e:clipboard` 固化：无选区右键打开菜单且
+  「复制」禁用；全选后右键直接复制（菜单不出现）并清除选区；Ctrl+C 把选区写入
+  剪贴板且不发送 `0x03`，随后无选区 Ctrl+C 发送 `0x03`；多行粘贴弹出对话框、
+  确认前服务器收不到任何内容，确认后才写入；单行 Ctrl+Shift+V 直接粘贴且不弹窗。
   断线专项检查用 SIGSTOP 冻结 mock sshd 模拟设备失联：
   keepalive 在约 60 秒发现链路失效并进入自动重连，预算（8 次/约 120 秒）耗尽后状态
   变为「已断开」而非无限重连，终端缓冲同时打印 `[HShell] 连接已断开…` 与

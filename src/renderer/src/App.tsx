@@ -11,6 +11,7 @@ import { FolderDialog } from './components/FolderDialog'
 import { HostKeyDialog } from './components/HostKeyDialog'
 import { KeyboardDialog } from './components/KeyboardDialog'
 import { KeysDialog } from './components/KeysDialog'
+import { PasteConfirmDialog } from './components/PasteConfirmDialog'
 import { QuickCommandsDialog } from './components/QuickCommandsDialog'
 import { SessionDialog } from './components/SessionDialog'
 import { SessionSidebar } from './components/SessionSidebar'
@@ -200,6 +201,7 @@ export default function App(): ReactElement {
       <ShortcutsDialog />
       <AboutDialog />
       <FolderDialog />
+      <PasteConfirmDialog />
       <Toasts />
     </div>
   )

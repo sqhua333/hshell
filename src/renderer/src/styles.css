@@ -1681,21 +1681,50 @@ kbd {
   text-align: left;
 }
 
-.context-item:hover {
+.context-item:not(:disabled):hover {
   background: var(--accent-soft);
   color: var(--accent);
+}
+
+.context-item:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .context-item.danger {
   color: #dc2626;
 }
 
-.context-item.danger:hover {
+.context-item.danger:not(:disabled):hover {
   background: #fee2e2;
 }
 
-:root[data-theme='dark'] .context-item.danger:hover {
+:root[data-theme='dark'] .context-item.danger:not(:disabled):hover {
   background: #3a1c1c;
+}
+
+.context-hint {
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.paste-preview {
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font-family: "JetBrains Mono", "Cascadia Mono", "Fira Code", Menlo, Consolas,
+    "Noto Sans Mono CJK SC", monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .context-sep {

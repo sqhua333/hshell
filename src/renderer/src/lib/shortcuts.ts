@@ -40,6 +40,13 @@ export interface ShortcutDef {
   label: string
   labelEn: string
   display: string
+  /** Displayed instead of `display` on macOS. */
+  displayMac?: string
+  /**
+   * Contextual shortcuts (handled by the terminal, not the global key map).
+   * They are listed in the help dialog but never registered globally.
+   */
+  infoOnly?: boolean
 }
 
 export interface ShortcutGroup {
@@ -66,6 +73,8 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
     title: '终端', titleEn: 'Terminal',
     items: [
+      { combo: 'mod+c', action: 'edit:copy', infoOnly: true, label: '有选中内容时复制', labelEn: 'Copy when text is selected', display: 'Ctrl+C', displayMac: 'Cmd+C' },
+      { combo: 'mod+v', action: 'edit:paste', infoOnly: true, label: '粘贴', labelEn: 'Paste', display: 'Ctrl+V', displayMac: 'Cmd+V' },
       { combo: 'mod+shift+c', action: 'edit:copy', label: '复制选中内容', labelEn: 'Copy selection', display: 'Ctrl+Shift+C' },
       { combo: 'mod+insert', action: 'edit:copy', label: '复制选中内容', labelEn: 'Copy selection', display: 'Ctrl+Insert' },
       { combo: 'mod+shift+v', action: 'edit:paste', label: '粘贴', labelEn: 'Paste', display: 'Ctrl+Shift+V' },
@@ -98,7 +107,9 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
 const COMBO_MAP = new Map<string, ShortcutAction>()
 for (const group of SHORTCUT_GROUPS) {
   for (const item of group.items) {
-    if (!item.combo.includes('…')) COMBO_MAP.set(item.combo, item.action)
+    if (!item.infoOnly && !item.combo.includes('…')) {
+      COMBO_MAP.set(item.combo, item.action)
+    }
   }
 }
 

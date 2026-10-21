@@ -36,6 +36,8 @@ import {
 } from './lib/quick-commands'
 import { generateReplayScript, recorder, replayFileName } from './lib/recorder'
 import { clampSidebarWidth, SIDEBAR_DEFAULT_PX } from './lib/sidebar-width'
+import { needsPasteConfirm, pasteLineCount } from './lib/terminal-clipboard'
+import { getTerminal } from './lib/terminal-registry'
 
 const QUICK_COMMANDS_KEY = 'hshell.quickCommands'
 
@@ -53,6 +55,12 @@ export interface Toast {
   id: string
   level: 'info' | 'warn' | 'error'
   message: string
+}
+
+/** Multi-line paste waiting for the user to confirm it. */
+export interface PasteConfirmState {
+  runtimeId: string
+  text: string
 }
 
 export type SessionDialogTab =
@@ -125,6 +133,7 @@ interface AppState {
   keyboard: (KeyboardPrompt & { runtimeId: string }) | null
   /** Inline terminal prompt shown after password authentication failed. */
   passwordPrompt: (PasswordPrompt & { runtimeId: string }) | null
+  pasteConfirm: PasteConfirmState | null
 
   sessionDialog: SessionDialogState
   shortcutsHelp: boolean
@@ -171,8 +180,14 @@ interface AppState {
   setTunnels(runtimeId: string, tunnels: TunnelInfo[]): void
   applyTunnelStatus(info: TunnelInfo): void
 
-  addToast(level: Toast['level'], message: string): void
+  addToast(level: Toast['level'], message: string, duration?: number): void
   removeToast(id: string): void
+
+  copySelection(runtimeId: string | null): Promise<boolean>
+  pasteClipboard(runtimeId: string | null): Promise<void>
+  pasteToTerminal(runtimeId: string, text: string): void
+  confirmPaste(): void
+  cancelPaste(): void
 
   setHostKey(value: (HostKeyPrompt & { runtimeId: string }) | null): void
   setKeyboard(value: (KeyboardPrompt & { runtimeId: string }) | null): void
@@ -361,6 +376,7 @@ export const useApp = create<AppState>((set, get) => ({
   hostKey: null,
   keyboard: null,
   passwordPrompt: null,
+  pasteConfirm: null,
   sessionDialog: { open: false, initial: null, presetFolderId: null, initialTab: 'connection' },
   shortcutsHelp: false,
   aboutOpen: false,
@@ -756,14 +772,100 @@ export const useApp = create<AppState>((set, get) => ({
     })
   },
 
-  addToast(level, message) {
+  addToast(level, message, duration = 5000) {
     const toast = { id: uid('toast'), level, message }
     set((state) => ({ toasts: [...state.toasts, toast] }))
-    setTimeout(() => get().removeToast(toast.id), 5000)
+    setTimeout(() => get().removeToast(toast.id), duration)
   },
 
   removeToast(id) {
     set((state) => ({ toasts: state.toasts.filter((toast) => toast.id !== id) }))
+  },
+
+  async copySelection(runtimeId) {
+    const handle = getTerminal(runtimeId)
+    if (!handle) {
+      get().addToast('info', tr('没有可复制的终端内容', 'No terminal to copy from'), 1800)
+      return false
+    }
+    const selection = handle.terminal.getSelection()
+    if (!selection) {
+      get().addToast('info', tr('没有选中的内容', 'Nothing is selected'), 1800)
+      return false
+    }
+    try {
+      await api.clipboard.writeText(selection)
+    } catch (error) {
+      get().addToast(
+        'error',
+        tr(`复制失败：${(error as Error).message}`, `Copy failed: ${(error as Error).message}`),
+        4000
+      )
+      return false
+    }
+    // Clearing means the next Ctrl+C sends SIGINT instead of copying again.
+    handle.terminal.clearSelection()
+    handle.focus()
+    const lines = pasteLineCount(selection)
+    get().addToast(
+      'info',
+      lines > 1
+        ? tr(`已复制 ${lines} 行`, `Copied ${lines} lines`)
+        : tr('已复制到剪贴板', 'Copied to clipboard'),
+      1600
+    )
+    return true
+  },
+
+  async pasteClipboard(runtimeId) {
+    const handle = getTerminal(runtimeId)
+    if (!handle || !runtimeId) return
+    let text = ''
+    try {
+      text = await api.clipboard.readText()
+    } catch (error) {
+      get().addToast(
+        'error',
+        tr(
+          `无法读取剪贴板：${(error as Error).message}`,
+          `Could not read the clipboard: ${(error as Error).message}`
+        ),
+        4000
+      )
+      return
+    }
+    if (!text) {
+      get().addToast('info', tr('剪贴板为空', 'The clipboard is empty'), 1800)
+      return
+    }
+    get().pasteToTerminal(runtimeId, text)
+  },
+
+  pasteToTerminal(runtimeId, text) {
+    const handle = getTerminal(runtimeId)
+    if (!handle || !text) return
+    if (needsPasteConfirm(text, handle.terminal.modes.bracketedPasteMode)) {
+      set({ pasteConfirm: { runtimeId, text } })
+      return
+    }
+    handle.terminal.paste(text)
+    handle.focus()
+  },
+
+  confirmPaste() {
+    const pending = get().pasteConfirm
+    if (!pending) return
+    set({ pasteConfirm: null })
+    const handle = getTerminal(pending.runtimeId)
+    if (!handle) return
+    handle.terminal.paste(pending.text)
+    handle.focus()
+  },
+
+  cancelPaste() {
+    const pending = get().pasteConfirm
+    set({ pasteConfirm: null })
+    getTerminal(pending?.runtimeId ?? get().activeRuntimeId)?.focus()
   },
 
   setHostKey(value) {

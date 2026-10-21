@@ -5,7 +5,10 @@ import { Icon } from './Icon'
 export interface ContextMenuItem {
   label: string
   icon?: string
+  /** Shortcut hint shown on the right, e.g. `Ctrl+C`. */
+  hint?: string
   danger?: boolean
+  disabled?: boolean
   separator?: boolean
   onClick?: () => void
 }
@@ -52,6 +55,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps): ReactEl
           <button
             key={`${item.label}-${index}`}
             className={`context-item ${item.danger ? 'danger' : ''}`}
+            disabled={item.disabled}
             onClick={() => {
               onClose()
               item.onClick?.()
@@ -59,6 +63,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps): ReactEl
           >
             {item.icon ? <Icon name={item.icon} size={15} /> : <span className="context-icon" />}
             <span>{item.label}</span>
+            {item.hint ? <span className="context-hint">{item.hint}</span> : null}
           </button>
         )
       )}
