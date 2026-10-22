@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react'
-import { isLocalSession } from '@shared/session'
+import { isFtpSession, isLocalSession } from '@shared/session'
 import { api } from '../api'
 import { tr } from '../lib/i18n'
 import { recorder } from '../lib/recorder'
@@ -12,7 +12,11 @@ interface SessionDockProps {
   visible: boolean
 }
 
-export function SessionDock({ tab, activeRuntimeId, visible }: SessionDockProps): ReactElement {
+export function SessionDock({
+  tab,
+  activeRuntimeId,
+  visible
+}: SessionDockProps): ReactElement | null {
   const sessions = useApp((state) => state.sessions)
   const quickBarAutoHide = useApp((state) => state.quickBarAutoHide)
   const toggleQuickBarAutoHide = useApp((state) => state.toggleQuickBarAutoHide)
@@ -69,6 +73,10 @@ export function SessionDock({ tab, activeRuntimeId, visible }: SessionDockProps)
     send(composeText, sendEnter)
     composeRef.current?.focus()
   }
+
+  // FTP tabs are a file manager; quick commands and the compose box do not
+  // apply. Hooks above still run in the same order for every tab.
+  if (isFtpSession(session)) return null
 
   const collapsed = quickBarAutoHide && !composeOpen
 

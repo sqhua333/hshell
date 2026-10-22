@@ -9,7 +9,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactElement
 } from 'react'
-import { sessionTarget } from '@shared/session'
+import { isFtpSession, sessionTarget } from '@shared/session'
 import type { SplitDirection } from '@shared/types'
 import { isElectron } from '../api'
 import { tr } from '../lib/i18n'
@@ -28,6 +28,7 @@ import {
 } from '../lib/session-drag'
 import { getTerminal } from '../lib/terminal-registry'
 import { useApp } from '../store'
+import { FtpPane } from './FtpPane'
 import { Icon } from './Icon'
 import { SessionDock } from './SessionDock'
 import { TabBar } from './TabBar'
@@ -412,6 +413,10 @@ export function TerminalArea(): ReactElement {
                 {tab.panes.map((pane) => {
                   const rect = geometryByTab.get(tab.id)?.panes.get(pane.id)
                   if (!rect) return null
+                  const paneSession =
+                    sessions.find((item) => item.id === pane.sessionId) ??
+                    tab.paneSessions?.[pane.sessionId] ??
+                    tab.session
                   return (
                     <div
                       key={pane.id}
@@ -425,26 +430,33 @@ export function TerminalArea(): ReactElement {
                         height: `${rect.height * 100}%`
                       }}
                     >
-                      <Suspense
-                        fallback={
-                          <div className="terminal-loading">
-                            {tr('正在加载终端…', 'Loading terminal…')}
-                          </div>
-                        }
-                      >
-                        <TerminalPane
+                      {isFtpSession(paneSession) ? (
+                        <FtpPane
                           runtimeId={pane.runtimeId}
-                          session={
-                            sessions.find((item) => item.id === pane.sessionId) ??
-                            tab.paneSessions?.[pane.sessionId] ??
-                            tab.session
-                          }
+                          session={paneSession}
                           visible={tab.id === activeTabId}
                           showClose={tab.panes.length > 1}
                           autoConnect={pane.autoConnect}
                           onClose={() => closePane(tab.id, pane.id)}
                         />
-                      </Suspense>
+                      ) : (
+                        <Suspense
+                          fallback={
+                            <div className="terminal-loading">
+                              {tr('正在加载终端…', 'Loading terminal…')}
+                            </div>
+                          }
+                        >
+                          <TerminalPane
+                            runtimeId={pane.runtimeId}
+                            session={paneSession}
+                            visible={tab.id === activeTabId}
+                            showClose={tab.panes.length > 1}
+                            autoConnect={pane.autoConnect}
+                            onClose={() => closePane(tab.id, pane.id)}
+                          />
+                        </Suspense>
+                      )}
                     </div>
                   )
                 })}

@@ -25,11 +25,17 @@ import type {
   AuthConfig,
   ConnectRequest,
   FileEntry,
+  RemoteMonitorSample,
   Session,
   TunnelConfig,
   TunnelInfo
 } from '@shared/types'
 import { parseProxyJump } from '@shared/jump'
+import {
+  MONITOR_COMMAND,
+  parseMonitorOutput,
+  type MonitorBaseline
+} from '../monitor/remote'
 import { resolveLogDirectory, SessionLogger } from '../storage/session-log'
 import { ForwardService } from './forward-service'
 import { KnownHosts, fingerprintOf, parseKeyAlgorithm } from './known-hosts'
@@ -135,6 +141,10 @@ export interface ReconnectPolicy {
   /** Give up once this much time has passed since the first drop. */
   windowMs?: number
 }
+/** Cap monitor exec output; /proc files are a few KiB at most. */
+const MONITOR_MAX_OUTPUT = 512 * 1024
+const MONITOR_TIMEOUT_MS = 6000
+
 const TRANSFER_CANCELLED = '传输已取消'
 const MAX_TRANSFER_DEPTH = 64
 const MAX_TRANSFER_FILES = 20_000
@@ -183,11 +193,50 @@ function friendlyError(err: Error): string {
   return msg
 }
 
+/** Run a short command and buffer its stdout, with timeout and size limits. */
+function execCapture(client: Client, command: string, timeoutMs: number): Promise<string> {
+  return new Promise((resolvePromise, reject) => {
+    let settled = false
+    let stream: ClientChannel | null = null
+    let timer: NodeJS.Timeout | null = null
+    const finish = (error: Error | null, output = ''): void => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      try {
+        stream?.close()
+      } catch {
+        /* the channel may already be gone */
+      }
+      if (error) reject(error)
+      else resolvePromise(output)
+    }
+    timer = setTimeout(() => finish(new Error('远程监控采集超时')), timeoutMs)
+    client.exec(command, (error, channel) => {
+      if (error) {
+        finish(error)
+        return
+      }
+      stream = channel
+      let output = ''
+      channel.on('data', (chunk: Buffer) => {
+        output += chunk.toString('utf8')
+        if (output.length > MONITOR_MAX_OUTPUT) finish(new Error('远程监控输出异常'))
+      })
+      channel.stderr.on('data', () => undefined)
+      channel.on('error', (channelError: Error) => finish(channelError))
+      channel.on('close', () => finish(null, output))
+    })
+  })
+}
+
 export class SshManager {
   private runtimes = new Map<string, Runtime>()
   private hostKeyRequests = new Map<string, PendingHostKey>()
   private keyboardRequests = new Map<string, PendingKeyboard>()
   private transfers = new Map<string, TransferJob>()
+  private monitorBaselines = new Map<string, MonitorBaseline>()
+  private monitorJobs = new Map<string, Promise<RemoteMonitorSample>>()
   private readonly tunnels: ForwardService
   private readonly maxReconnectAttempts: number
   private readonly retryBaseMs: number
@@ -925,6 +974,32 @@ export class SshManager {
     return this.tunnels.list(runtimeId)
   }
 
+  /**
+   * Sample host resources over an existing SSH connection. Overlapping polls
+   * for the same runtime share one in-flight exec so a slow host cannot queue
+   * up channels.
+   */
+  sampleMonitor(runtimeId: string): Promise<RemoteMonitorSample> {
+    const pending = this.monitorJobs.get(runtimeId)
+    if (pending) return pending
+    const job = this.collectMonitor(runtimeId).finally(() => {
+      if (this.monitorJobs.get(runtimeId) === job) this.monitorJobs.delete(runtimeId)
+    })
+    this.monitorJobs.set(runtimeId, job)
+    return job
+  }
+
+  private async collectMonitor(runtimeId: string): Promise<RemoteMonitorSample> {
+    const rt = this.runtimes.get(runtimeId)
+    if (!rt || !rt.authenticated || !rt.client) {
+      throw new Error('SSH 会话未连接，无法读取远程监控')
+    }
+    const raw = await execCapture(rt.client, MONITOR_COMMAND, MONITOR_TIMEOUT_MS)
+    const reading = parseMonitorOutput(raw, Date.now(), this.monitorBaselines.get(runtimeId))
+    this.monitorBaselines.set(runtimeId, reading.baseline)
+    return reading.sample
+  }
+
   write(runtimeId: string, data: string): void {
     const rt = this.runtimes.get(runtimeId)
     if (!rt?.stream) return
@@ -1007,6 +1082,8 @@ export class SshManager {
     rt.stream = null
     rt.sftp = null
     rt.client = null
+    this.monitorBaselines.delete(runtimeId)
+    this.monitorJobs.delete(runtimeId)
     this.runtimes.delete(runtimeId)
     this.emit({ type: 'ssh:status', runtimeId, status: 'closed' })
   }

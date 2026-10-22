@@ -14,6 +14,9 @@ export default defineConfig({
   renderer: {
     root: 'src/renderer',
     resolve: { alias: { '@shared': resolve('src/shared') } },
+    // Inlined at build time; shown in the About dialog. Dev runs report the
+    // moment `electron-vite dev` started.
+    define: { __BUILD_TIME__: JSON.stringify(new Date().toISOString()) },
     plugins: [react()]
   }
 })

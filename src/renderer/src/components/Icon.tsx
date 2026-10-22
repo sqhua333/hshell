@@ -218,6 +218,13 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M4 11v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7" />
       <path d="M15 4l5 5-8 8H7v-5z" />
     </>
+  ),
+  computer: (
+    <>
+      <rect x="3" y="4" width="18" height="12" rx="2" />
+      <line x1="8" y1="20" x2="16" y2="20" />
+      <line x1="12" y1="16" x2="12" y2="20" />
+    </>
   )
 }
 

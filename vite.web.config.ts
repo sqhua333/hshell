@@ -14,6 +14,7 @@ export default defineConfig({
   root: resolve('src/renderer'),
   plugins: [react()],
   resolve: { alias: { '@shared': resolve('src/shared') } },
+  define: { __BUILD_TIME__: JSON.stringify(new Date().toISOString()) },
   server: { port, strictPort: true, host },
   preview: { port, strictPort: true, host },
   build: { outDir: resolve('dist-web'), emptyOutDir: true }

@@ -8,7 +8,21 @@ import { sessionForRuntime, useApp } from '../store'
 import { Icon } from './Icon'
 import { Modal } from './Modal'
 
+function isWindowsPath(path: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\')
+}
+
 function parentPath(path: string): string {
+  if (isWindowsPath(path)) {
+    const normalized = path.replace(/[\\/]+$/, '')
+    // Drive and UNC share roots have no filesystem parent; the caller shows This PC.
+    if (/^[A-Za-z]:$/.test(normalized)) return ''
+    if (/^\\\\[^\\/]+[\\/][^\\/]+$/.test(normalized)) return ''
+    const index = Math.max(normalized.lastIndexOf('\\'), normalized.lastIndexOf('/'))
+    if (index < 0) return ''
+    if (index === 2 && /^[A-Za-z]:/.test(normalized)) return `${normalized.slice(0, 2)}\\`
+    return normalized.slice(0, index)
+  }
   const normalized = path.replace(/\/+$/, '')
   if (!normalized || normalized === '/') return '/'
   const index = normalized.lastIndexOf('/')
@@ -16,6 +30,10 @@ function parentPath(path: string): string {
 }
 
 function joinPath(dir: string, name: string): string {
+  if (isWindowsPath(dir)) {
+    const base = dir.replace(/[\\/]+$/, '')
+    return base ? `${base}\\${name}` : name
+  }
   if (!dir || dir === '/') return `/${name}`
   return `${dir.replace(/\/+$/, '')}/${name}`
 }
@@ -144,21 +162,50 @@ function NameDialog({ title, initial, onSubmit, onClose }: NameDialogProps): Rea
   )
 }
 
+/** The SFTP panel shown below the terminal for SSH sessions. */
 export function SftpPanel(): ReactElement {
   const activeRuntimeId = useApp((state) => state.activeRuntimeId)
+  return (
+    <FileTransferPanel
+      runtimeId={activeRuntimeId}
+      protocol="sftp"
+      onClose={() => useApp.getState().toggleSftp()}
+    />
+  )
+}
+
+/**
+ * Two-pane local/remote file manager shared by SFTP and standalone FTP
+ * sessions. The remote calls have identical shapes in both APIs.
+ */
+export function FileTransferPanel({
+  runtimeId: activeRuntimeId,
+  protocol,
+  onClose
+}: {
+  runtimeId: string | null
+  protocol: 'sftp' | 'ftp'
+  onClose?: () => void
+}): ReactElement {
   const status = useApp((state) =>
-    state.activeRuntimeId ? state.statuses[state.activeRuntimeId]?.status : undefined
+    activeRuntimeId ? state.statuses[activeRuntimeId]?.status : undefined
   )
   const nonSshActive = useApp((state) =>
     isNonSshSession(sessionForRuntime(state.activeRuntimeId, state))
   )
   const addToast = useApp((state) => state.addToast)
+  const remote = protocol === 'ftp' ? api.ftp : api.sftp
+  const label = protocol === 'ftp' ? 'FTP' : 'SFTP'
 
   const [localPath, setLocalPath] = useState('')
   const [localDraft, setLocalDraft] = useState('')
   const [localEntries, setLocalEntries] = useState<FileEntry[]>([])
   const [localSelected, setLocalSelected] = useState<FileEntry | null>(null)
   const [localLoading, setLocalLoading] = useState(false)
+  // True while the local pane lists drive roots ("This PC") instead of a directory.
+  const [localDrives, setLocalDrives] = useState(false)
+  const isWindows = api.app.platform === 'win32'
+  const thisPcLabel = tr('此电脑', 'This PC')
 
   const [remotePath, setRemotePath] = useState('')
   const [remoteDraft, setRemoteDraft] = useState('')
@@ -177,7 +224,10 @@ export function SftpPanel(): ReactElement {
     onSubmit: (value: string) => void
   } | null>(null)
 
-  const remoteReady = Boolean(activeRuntimeId) && status === 'connected' && !nonSshActive
+  const remoteReady =
+    Boolean(activeRuntimeId) &&
+    status === 'connected' &&
+    (protocol === 'ftp' || !nonSshActive)
 
   const loadLocal = async (path: string): Promise<void> => {
     setLocalLoading(true)
@@ -187,6 +237,7 @@ export function SftpPanel(): ReactElement {
       setLocalPath(path)
       setLocalDraft(path)
       setLocalSelected(null)
+      setLocalDrives(false)
     } catch (error) {
       addToast('error', `${tr('本地目录读取失败：', 'Failed to read local directory: ')}${(error as Error).message}`)
       setLocalDraft(localPath)
@@ -195,11 +246,33 @@ export function SftpPanel(): ReactElement {
     }
   }
 
+  const loadDrives = async (): Promise<void> => {
+    setLocalLoading(true)
+    try {
+      const entries = await api.fs.drives()
+      setLocalEntries(entries)
+      setLocalSelected(null)
+      setLocalDrives(true)
+      setLocalDraft(thisPcLabel)
+    } catch (error) {
+      addToast('error', `${tr('驱动器读取失败：', 'Failed to list drives: ')}${(error as Error).message}`)
+    } finally {
+      setLocalLoading(false)
+    }
+  }
+
+  const localUp = (): void => {
+    if (localDrives) return
+    const parent = parentPath(localPath)
+    if (parent) void loadLocal(parent)
+    else if (isWindows) void loadDrives()
+  }
+
   const loadRemote = async (path: string): Promise<void> => {
     if (!activeRuntimeId) return
     setRemoteLoading(true)
     try {
-      const entries = await api.sftp.list(activeRuntimeId, path)
+      const entries = await remote.list(activeRuntimeId, path)
       setRemoteEntries(entries)
       setRemotePath(path)
       setRemoteDraft(path)
@@ -235,13 +308,18 @@ export function SftpPanel(): ReactElement {
       return
     }
     let cancelled = false
-    void api.sftp
+    void remote
       .startDir(activeRuntimeId)
       .then((dir) => {
         if (!cancelled) void loadRemote(dir)
       })
       .catch((error: Error) => {
-        if (!cancelled) addToast('error', `${tr('SFTP 初始化失败：', 'Failed to initialize SFTP: ')}${error.message}`)
+        if (!cancelled) {
+          addToast(
+            'error',
+            `${tr(`${label} 初始化失败：`, `Failed to initialize ${label}: `)}${error.message}`
+          )
+        }
       })
     return () => {
       cancelled = true
@@ -251,13 +329,19 @@ export function SftpPanel(): ReactElement {
 
   const requireRemote = (): string | null => {
     if (!activeRuntimeId || !remoteReady) {
-      addToast('warn', tr('请先连接 SSH 会话', 'Connect an SSH session first'))
+      addToast(
+        'warn',
+        protocol === 'ftp'
+          ? tr('请先连接 FTP 会话', 'Connect an FTP session first')
+          : tr('请先连接 SSH 会话', 'Connect an SSH session first')
+      )
       return null
     }
     return activeRuntimeId
   }
 
   const uploadEntry = async (entry: FileEntry): Promise<void> => {
+    if (localDrives) return
     const runtimeId = requireRemote()
     if (!runtimeId) return
     const transferId = newTransferId()
@@ -265,7 +349,7 @@ export function SftpPanel(): ReactElement {
     setActiveTransfer(transferId)
     addToast('info', `${tr('正在上传', 'Uploading')} ${entry.name}…`)
     try {
-      await api.sftp.upload(runtimeId, [entry.path], remotePath, transferId)
+      await remote.upload(runtimeId, [entry.path], remotePath, transferId)
       await loadRemote(remotePath)
     } catch (error) {
       const message = (error as Error).message
@@ -282,6 +366,11 @@ export function SftpPanel(): ReactElement {
   }
 
   const downloadEntry = async (entry: FileEntry): Promise<void> => {
+    // In the This PC view there is no concrete local destination directory.
+    if (localDrives) {
+      addToast('warn', tr('请先选择本地目录再下载', 'Choose a local directory before downloading'))
+      return
+    }
     const runtimeId = requireRemote()
     if (!runtimeId) return
     const transferId = newTransferId()
@@ -289,7 +378,7 @@ export function SftpPanel(): ReactElement {
     setActiveTransfer(transferId)
     addToast('info', `${tr('正在下载', 'Downloading')} ${entry.name}…`)
     try {
-      await api.sftp.download(runtimeId, [entry.path], localPath, transferId)
+      await remote.download(runtimeId, [entry.path], localPath, transferId)
       await loadLocal(localPath)
     } catch (error) {
       const message = (error as Error).message
@@ -302,7 +391,7 @@ export function SftpPanel(): ReactElement {
   }
 
   const cancelTransfer = (): void => {
-    if (activeTransfer) void api.sftp.cancel(activeTransfer)
+    if (activeTransfer) void remote.cancel(activeTransfer)
   }
 
   const downloadSelected = async (): Promise<void> => {
@@ -310,6 +399,7 @@ export function SftpPanel(): ReactElement {
   }
 
   const localMkdir = (): void => {
+    if (localDrives) return
     setNameDialog({
       title: tr('新建本地文件夹', 'New local folder'),
       initial: tr('新建文件夹', 'New folder'),
@@ -324,7 +414,7 @@ export function SftpPanel(): ReactElement {
   }
 
   const localRename = (): void => {
-    if (!localSelected) return
+    if (localDrives || !localSelected) return
     setNameDialog({
       title: tr('重命名', 'Rename'),
       initial: localSelected.name,
@@ -339,7 +429,7 @@ export function SftpPanel(): ReactElement {
   }
 
   const localRemove = (): void => {
-    if (!localSelected) return
+    if (localDrives || !localSelected) return
     if (!window.confirm(`${tr('确定删除本地「', 'Delete local ')}"${localSelected.name}"${tr('」吗？', '?')}`)) return
     void api.fs
       .remove(localSelected.path, localSelected.type === 'directory')
@@ -355,7 +445,7 @@ export function SftpPanel(): ReactElement {
       initial: tr('新建文件夹', 'New folder'),
       onSubmit: (value) => {
         setNameDialog(null)
-        void api.sftp
+        void remote
           .mkdir(runtimeId, joinPath(remotePath, value))
           .then(() => loadRemote(remotePath))
           .catch((error: Error) => addToast('error', error.message))
@@ -371,7 +461,7 @@ export function SftpPanel(): ReactElement {
       initial: remoteSelected.name,
       onSubmit: (value) => {
         setNameDialog(null)
-        void api.sftp
+        void remote
           .rename(runtimeId, remoteSelected.path, joinPath(remotePath, value))
           .then(() => loadRemote(remotePath))
           .catch((error: Error) => addToast('error', error.message))
@@ -383,7 +473,7 @@ export function SftpPanel(): ReactElement {
     const runtimeId = requireRemote()
     if (!runtimeId || !remoteSelected) return
     if (!window.confirm(`${tr('确定删除远程「', 'Delete remote ')}"${remoteSelected.name}"${tr('」吗？', '?')}`)) return
-    void api.sftp
+    void remote
       .remove(runtimeId, remoteSelected.path, remoteSelected.type === 'directory')
       .then(() => loadRemote(remotePath))
       .catch((error: Error) => addToast('error', error.message))
@@ -403,7 +493,7 @@ export function SftpPanel(): ReactElement {
           addToast('error', tr('权限值无效，请输入 0–7777 的八进制数', 'Invalid mode, enter an octal value from 0 to 7777'))
           return
         }
-        void api.sftp
+        void remote
           .chmod(runtimeId, selectedPath, mode)
           .then(() => loadRemote(remotePath))
           .catch((error: Error) => addToast('error', `${tr('修改权限失败：', 'Failed to change permissions: ')}${error.message}`))
@@ -418,28 +508,54 @@ export function SftpPanel(): ReactElement {
           <Icon name="server" size={14} /> {tr('本地', 'Local')}
         </span>
         <div className="sftp-toolbar">
+          {isWindows ? (
+            <button
+              className="icon-btn"
+              title={tr('我的电脑', 'This PC')}
+              onClick={() => void loadDrives()}
+              disabled={localLoading}
+            >
+              <Icon name="computer" size={14} />
+            </button>
+          ) : null}
           <button
             className="icon-btn"
             title={tr('上级目录', 'Parent directory')}
-            onClick={() => void loadLocal(parentPath(localPath))}
+            onClick={localUp}
+            disabled={localDrives}
           >
             <Icon name="arrow-up" size={14} />
           </button>
           <button
             className="icon-btn"
             title={tr('刷新', 'Refresh')}
-            onClick={() => void loadLocal(localPath)}
+            onClick={() => (localDrives ? void loadDrives() : void loadLocal(localPath))}
             disabled={localLoading}
           >
             <Icon name="refresh" size={14} />
           </button>
-          <button className="icon-btn" title={tr('新建文件夹', 'New folder')} onClick={localMkdir}>
+          <button
+            className="icon-btn"
+            title={tr('新建文件夹', 'New folder')}
+            onClick={localMkdir}
+            disabled={localDrives}
+          >
             <Icon name="folder-plus" size={14} />
           </button>
-          <button className="icon-btn" title={tr('重命名', 'Rename')} onClick={localRename} disabled={!localSelected}>
+          <button
+            className="icon-btn"
+            title={tr('重命名', 'Rename')}
+            onClick={localRename}
+            disabled={localDrives || !localSelected}
+          >
             <Icon name="edit" size={14} />
           </button>
-          <button className="icon-btn" title={tr('删除', 'Delete')} onClick={localRemove} disabled={!localSelected}>
+          <button
+            className="icon-btn"
+            title={tr('删除', 'Delete')}
+            onClick={localRemove}
+            disabled={localDrives || !localSelected}
+          >
             <Icon name="trash" size={14} />
           </button>
           <span className="sftp-toolbar-sep" />
@@ -447,7 +563,7 @@ export function SftpPanel(): ReactElement {
             className="sftp-action"
             title={tr('上传选中项到远程当前目录', 'Upload selected item to the remote directory')}
             onClick={() => void uploadSelected()}
-            disabled={!localSelected || !remoteReady || busy}
+            disabled={localDrives || !localSelected || !remoteReady || busy}
           >
             <Icon name="upload" size={14} />
             {tr('上传', 'Upload')}
@@ -459,8 +575,14 @@ export function SftpPanel(): ReactElement {
           value={localDraft}
           onChange={(event) => setLocalDraft(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === 'Enter') void loadLocal(localDraft)
+            if (event.key !== 'Enter') return
+            if (localDrives && (!localDraft.trim() || localDraft.trim() === thisPcLabel)) {
+              void loadDrives()
+            } else {
+              void loadLocal(localDraft)
+            }
           }}
+          placeholder={tr('输入本地路径', 'Enter a local path')}
           spellCheck={false}
         />
         {localLoading ? <span className="spinner small" /> : null}
@@ -481,7 +603,8 @@ export function SftpPanel(): ReactElement {
     <div className="sftp-pane">
       <div className="sftp-pane-header">
         <span className="sftp-pane-title">
-          <Icon name="terminal" size={14} /> {tr('远程', 'Remote')}
+          <Icon name={protocol === 'ftp' ? 'server' : 'terminal'} size={14} />{' '}
+          {tr('远程', 'Remote')}
         </span>
         <div className="sftp-toolbar">
           <button
@@ -537,11 +660,23 @@ export function SftpPanel(): ReactElement {
             className="sftp-action"
             title={tr('下载选中项到本地当前目录', 'Download selected item to the local directory')}
             onClick={() => void downloadSelected()}
-            disabled={!remoteSelected || !remoteReady || busy}
+            disabled={localDrives || !remoteSelected || !remoteReady || busy}
           >
             <Icon name="download" size={14} />
             {tr('下载', 'Download')}
           </button>
+          {onClose ? (
+            <>
+              <span className="sftp-toolbar-sep" />
+              <button
+                className="icon-btn"
+                title={tr('关闭文件传输面板', 'Close file transfer panel')}
+                onClick={onClose}
+              >
+                <Icon name="x" size={14} />
+              </button>
+            </>
+          ) : null}
         </div>
       </div>
       <div className="sftp-path">
@@ -551,7 +686,11 @@ export function SftpPanel(): ReactElement {
           onKeyDown={(event) => {
             if (event.key === 'Enter') void loadRemote(remoteDraft)
           }}
-          placeholder={tr('连接 SSH 后可用', 'Available after connecting SSH')}
+          placeholder={
+            protocol === 'ftp'
+              ? tr('连接 FTP 后可用', 'Available after connecting FTP')
+              : tr('连接 SSH 后可用', 'Available after connecting SSH')
+          }
           spellCheck={false}
           disabled={!remoteReady}
         />
@@ -570,7 +709,11 @@ export function SftpPanel(): ReactElement {
       ) : (
         <div className="sftp-empty">
           <Icon name="lock" size={22} />
-          <span>{tr('连接 SSH 会话后可用', 'Available after connecting an SSH session')}</span>
+          <span>
+            {protocol === 'ftp'
+              ? tr('连接 FTP 会话后可用', 'Available after connecting an FTP session')
+              : tr('连接 SSH 会话后可用', 'Available after connecting an SSH session')}
+          </span>
         </div>
       )}
     </div>

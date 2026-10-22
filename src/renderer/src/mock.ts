@@ -129,7 +129,7 @@ function buildLocalTree(): Map<string, FileEntry> {
   add(`${HOME}/Desktop`, 'directory')
   add(`${HOME}/Documents`, 'directory')
   add(`${HOME}/Downloads`, 'directory')
-  add(`${HOME}/Downloads/hshell-0.1.0.AppImage`, 'file', 96468992)
+  add(`${HOME}/Downloads/hshell-0.2.0.AppImage`, 'file', 96468992)
   add(`${HOME}/Downloads/notes.md`, 'file', 2100)
   add(`${HOME}/Documents/需求说明.md`, 'file', 6400)
   add(`${HOME}/Documents/会议记录.txt`, 'file', 1800)
@@ -361,6 +361,8 @@ function handleInput(rt: MockRuntime, data: string): void {
 
 export function createMockApi(): HshellApi {
   let clipboardFallback = ''
+  const monitorBootedAt = Date.now() - (3 * 86400 + 4 * 3600 + 12 * 60) * 1000
+  const monitor = { cpu: 18, memory: 57, swap: 3, down: 240 * 1024, up: 30 * 1024 }
 
   return {
     app: {
@@ -377,7 +379,7 @@ export function createMockApi(): HshellApi {
       setTheme: async () => undefined,
       info: async () => ({
         name: 'HShell',
-        version: '0.1.0-demo',
+        version: '0.2.0-demo',
         platform: 'web',
         userData: '',
         username: USERNAME
@@ -538,6 +540,94 @@ export function createMockApi(): HshellApi {
       cancelPassword: async () => undefined,
       keyboardInteractive: async () => undefined
     },
+    monitor: {
+      // Browser demo: walk plausible numbers so the panel can be evaluated
+      // without an SSH connection.
+      sample: async () => {
+        const walk = (
+          value: number,
+          min: number,
+          max: number,
+          spread: number,
+          pull: number,
+          center: number
+        ): number =>
+          Math.min(
+            max,
+            Math.max(min, value + (Math.random() - 0.5) * spread + (center - value) * pull)
+          )
+        monitor.cpu = walk(monitor.cpu, 2, 96, 26, 0.14, 24)
+        monitor.memory = walk(monitor.memory, 32, 92, 5, 0.1, 61)
+        monitor.swap = walk(monitor.swap, 0, 35, 1.6, 0.2, 3)
+        monitor.down = Math.min(
+          12 * 1024 * 1024,
+          Math.max(4 * 1024, monitor.down * (0.55 + Math.random() * 0.9) + Math.random() * 180 * 1024)
+        )
+        monitor.up = Math.min(
+          3 * 1024 * 1024,
+          Math.max(1024, monitor.up * (0.5 + Math.random() * 0.9) + Math.random() * 26 * 1024)
+        )
+        const now = Date.now()
+        return {
+          cpu: monitor.cpu,
+          cores: 8,
+          load: (monitor.cpu / 100) * 8 * 0.72,
+          memTotal: 16 * 1024 ** 3,
+          memUsed: (monitor.memory / 100) * 16 * 1024 ** 3,
+          swapTotal: 4 * 1024 ** 3,
+          swapUsed: (monitor.swap / 100) * 4 * 1024 ** 3,
+          diskTotal: 128 * 1024 ** 3,
+          diskUsed: 0.64 * 128 * 1024 ** 3,
+          netDown: monitor.down,
+          netUp: monitor.up,
+          uptime: Math.floor((now - monitorBootedAt) / 1000),
+          bootTime: monitorBootedAt,
+          timestamp: now
+        }
+      }
+    },
+    ftp: {
+      // Browser demo: browse the same simulated remote tree as SFTP.
+      home: async () => HOME,
+      startDir: async () => HOME,
+      list: async (_runtimeId, path) => listTree(remoteTree, path),
+      mkdir: async (_runtimeId, path) => {
+        const target = normalizePath(path)
+        if (remoteTree.has(target)) throw new Error('目录已存在')
+        remoteTree.set(target, makeEntry(target, 'directory'))
+      },
+      remove: async (_runtimeId, path) => {
+        const target = normalizePath(path)
+        for (const key of [...remoteTree.keys()]) {
+          if (key === target || key.startsWith(`${target}/`)) remoteTree.delete(key)
+        }
+      },
+      rename: async (_runtimeId, from, to) => {
+        const source = normalizePath(from)
+        const target = normalizePath(to)
+        const entry = remoteTree.get(source)
+        if (!entry) throw new Error('文件不存在')
+        for (const [key, value] of [...remoteTree.entries()]) {
+          if (key === source || key.startsWith(`${source}/`)) {
+            const moved = target + key.slice(source.length)
+            remoteTree.delete(key)
+            remoteTree.set(moved, { ...value, path: moved, name: moved.slice(moved.lastIndexOf('/') + 1) })
+          }
+        }
+      },
+      chmod: async (_runtimeId, path, mode) => {
+        const entry = remoteTree.get(normalizePath(path))
+        if (!entry) throw new Error('文件不存在')
+        entry.mode = mode
+      },
+      upload: async () => {
+        throw new Error('演示模式不支持上传')
+      },
+      download: async () => {
+        throw new Error('演示模式不支持下载')
+      },
+      cancel: async () => undefined
+    },
     sftp: {
       home: async () => HOME,
       startDir: async () => {
@@ -623,6 +713,7 @@ export function createMockApi(): HshellApi {
       home: async () => HOME,
       startDir: async () =>
         localTree.get(`${HOME}/Desktop`)?.type === 'directory' ? `${HOME}/Desktop` : HOME,
+      drives: async () => [],
       list: async (path) => listTree(localTree, path),
       mkdir: async (path) => {
         const target = normalizePath(path)

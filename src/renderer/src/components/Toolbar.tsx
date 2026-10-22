@@ -13,6 +13,7 @@ export function Toolbar(): ReactElement {
   const setLocale = useApp((state) => state.setLocale)
   const sidebarVisible = useApp((state) => state.sidebarVisible)
   const sftpVisible = useApp((state) => state.sftpVisible)
+  const monitorVisible = useApp((state) => state.monitorVisible)
   const activeRuntimeId = useApp((state) => state.activeRuntimeId)
   const composeOpen = useApp((state) => state.composeOpen)
   const toggleCompose = useApp((state) => state.toggleCompose)
@@ -83,6 +84,13 @@ export function Toolbar(): ReactElement {
         onClick={() => void runAction('view:sftp')}
       >
         <Icon name="upload" />
+      </button>
+      <button
+        className={`tool-btn ${monitorVisible ? 'active' : ''}`}
+        title={tr('远程监控面板 (Ctrl+Shift+U)', 'Remote monitoring panel (Ctrl+Shift+U)')}
+        onClick={() => useApp.getState().toggleMonitor()}
+      >
+        <Icon name="trigger" />
       </button>
       <button
         className="tool-btn"

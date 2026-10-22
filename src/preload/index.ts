@@ -77,6 +77,34 @@ const api: HshellApi = {
     keyboardInteractive: (requestId, responses, cancel) =>
       ipcRenderer.invoke('ssh:keyboardInteractive', requestId, responses, cancel)
   },
+  monitor: {
+    sample: (runtimeId) => ipcRenderer.invoke('monitor:sample', runtimeId)
+  },
+  ftp: {
+    home: (runtimeId: string) => ipcRenderer.invoke('ftp:home', runtimeId),
+    startDir: (runtimeId: string) => ipcRenderer.invoke('ftp:startDir', runtimeId),
+    list: (runtimeId: string, path: string) => ipcRenderer.invoke('ftp:list', runtimeId, path),
+    mkdir: (runtimeId: string, path: string) => ipcRenderer.invoke('ftp:mkdir', runtimeId, path),
+    remove: (runtimeId: string, path: string, isDir: boolean) =>
+      ipcRenderer.invoke('ftp:remove', runtimeId, path, isDir),
+    rename: (runtimeId: string, from: string, to: string) =>
+      ipcRenderer.invoke('ftp:rename', runtimeId, from, to),
+    chmod: (runtimeId: string, path: string, mode: number) =>
+      ipcRenderer.invoke('ftp:chmod', runtimeId, path, mode),
+    upload: (
+      runtimeId: string,
+      localPaths: string[],
+      remoteDir: string,
+      transferId?: string
+    ) => ipcRenderer.invoke('ftp:upload', runtimeId, localPaths, remoteDir, transferId),
+    download: (
+      runtimeId: string,
+      remotePaths: string[],
+      localDir: string,
+      transferId?: string
+    ) => ipcRenderer.invoke('ftp:download', runtimeId, remotePaths, localDir, transferId),
+    cancel: (transferId: string) => ipcRenderer.invoke('ftp:cancel', transferId)
+  },
   sftp: {
     home: (runtimeId) => ipcRenderer.invoke('sftp:home', runtimeId),
     startDir: (runtimeId) => ipcRenderer.invoke('sftp:startDir', runtimeId),
@@ -103,6 +131,7 @@ const api: HshellApi = {
   fs: {
     home: () => ipcRenderer.invoke('fs:home'),
     startDir: () => ipcRenderer.invoke('fs:startDir'),
+    drives: () => ipcRenderer.invoke('fs:drives'),
     list: (path) => ipcRenderer.invoke('fs:list', path),
     mkdir: (path) => ipcRenderer.invoke('fs:mkdir', path),
     remove: (path, isDir) => ipcRenderer.invoke('fs:remove', path, isDir),

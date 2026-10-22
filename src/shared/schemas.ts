@@ -54,6 +54,15 @@ export const highlightRuleSchema = z.object({
   enabled: z.boolean().optional()
 })
 
+export const telnetOptionsSchema = z.object({
+  autoLogin: z.boolean().optional(),
+  terminalType: z.string().min(1).max(64).optional()
+})
+
+export const ftpOptionsSchema = z.object({
+  secure: z.boolean().optional()
+})
+
 export const serialOptionsSchema = z.object({
   path: z.string().min(1).max(255),
   baudRate: z.number().int().min(50).max(4_000_000),
@@ -71,11 +80,14 @@ export const sessionSchema = z.object({
   folderId: z.string().max(128).nullable(),
   host: z.string().min(1).max(255),
   port: z.number().int().min(1).max(65535),
-  username: z.string().min(1).max(255),
+  // Telnet logs in from the terminal, so its username may be empty.
+  username: z.string().max(255),
   auth: authSchema,
   terminal: terminalOptionsSchema,
-  connectionType: z.enum(['ssh', 'serial', 'local']).optional(),
+  connectionType: z.enum(['ssh', 'serial', 'local', 'telnet', 'ftp']).optional(),
   serial: serialOptionsSchema.optional(),
+  telnet: telnetOptionsSchema.optional(),
+  ftp: ftpOptionsSchema.optional(),
   proxyJump: z.string().max(1024).nullable().optional(),
   jumpHosts: z.array(jumpHostSchema).max(8).optional(),
   quickCommands: z.array(quickCommandSchema).max(100).optional(),

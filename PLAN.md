@@ -669,6 +669,21 @@ mac:
   使用 `node-pty` 重放本机 Shell。`node-pty@1.2.0-beta.15` 为 N-API 预编译绑定，
   所有平台预编译文件随包发布并 `asarUnpack`，可从 Linux 交叉构建 Windows 产物。
   无头 E2E（`npm run e2e:local`）验证欢迎页入口、标签栏 `+`、编号与命令执行。
+- **Telnet**：会话协议可选 Telnet，默认端口 23。主进程 `main/telnet/` 实现精简
+  协议栈：剥离 IAC 序列，协商 TTYPE(24) / NAWS(31) / SGA(3) / ECHO(1)，拒绝其余
+  选项；TTYPE 在服务器确认后回复终端类型，NAWS 仅在服务器 DO 后上报并在 resize
+  时更新；输入按 NVT 规则把孤立 CR 扩为 CRLF 并转义 IAC。复用 `ssh:*` runtime
+  通道、8ms 批量与 ack 背压，支持日志、分屏、查找与主题；SFTP、端口转发、远程
+  监控、公钥安装与跳板机均按非 SSH 会话禁用。可选「自动登录」按 `login:` /
+  `username:` 与 `Password:` 提示各发送一次用户名和密码。Telnet 为明文协议，会话
+  属性中明确提示密码与内容可被窃听。
+- **FTP / FTPS**：会话协议可选 FTP，默认端口 21，基于 `basic-ftp`。会话打开后
+  不创建终端，而是渲染文件管理器（复用 SFTP 双栏组件，`FileTransferPanel`
+  的 `protocol` 决定调用 `api.sftp` 还是 `api.ftp`）：浏览、上传 / 下载（进度、
+  取消）、新建目录、重命名、删除与 `SITE CHMOD`。FTP 运行时同样接入
+  `ssh:*` 的 connect / disconnect 与 `sftp:progress` 事件；取消传输会关闭控制
+  连接，下一次操作自动重连。可选显式 FTPS（AUTH TLS），远程路径与控制字符校验
+  防止命令注入。FTP 会话不显示 SFTP 面板、快速命令栏、远程监控与端口转发。
 - **会话**：本地 JSON 持久化（临时文件 + fsync + rename、`.bak`、损坏隔离）、
   schema v2 迁移、分组环检测、CRUD、快速连接（`user@host:port`）、会话属性对话框；
   导出 / 导入 JSON 会话包（默认不含密钥，可选口令加密私钥）；`~/.ssh/config`
@@ -907,6 +922,8 @@ mac:
   配色方案与突出显示集）
 - [x] P13 会话密码保存（可选加密保存 / 重启自动复用 / 凭据随会话清理）
 - [x] P14 本机终端（标签栏 `+` 直接打开 / `node-pty` PTY / 分屏与录制 / 打包绑定）
+- [x] P15 FTP / Telnet（`basic-ftp` 文件管理器与显式 FTPS / Telnet 协商、NAWS、
+  自动登录 / 明文提示；非 SSH 会话禁用 SFTP、转发与监控）
 
 ### 实现备注
 
@@ -1023,6 +1040,18 @@ mac:
   对话框、查找栏与撰写窗格继续由各自的按键处理器关闭；连接失败面板在终端聚焦时
   仍由 App 的专用 Esc 处理器关闭，通知提示仅在焦点不在终端时响应 Esc。单测断言
   `matchShortcut(Escape) === null`，本地终端 E2E 通过 `cat -v` 断言 tty 收到 `^[`。
+- 突出显示规则的字面量模式支持用英文/中文逗号分隔多个关键词（`ERROR,WARNING`），
+  编译为正则选择项后任意命中即高亮；正则模式保持原样，避免破坏 `a{1,3}` 等量词，
+  匹配逗号本身需使用正则。触发器的单模式语义不变。
+- 远程监控（MobaXterm 风格底部栏）：渲染端 `RemoteMonitor` 每 2 秒通过
+  `monitor:sample` 读取当前 SSH 会话的 CPU、内存、交换、网络、磁盘与运行时间；
+  主进程 `main/monitor/remote.ts` 用单次 `exec` 采集 `/proc/stat`、`/proc/meminfo`、
+  `/proc/uptime`、`/proc/net/dev`、`/proc/loadavg`、`df -Pk /` 与 `date +%s`，
+  CPU 与网速按上次采样计算增量，运行时间与启动时刻以远端时钟换算并显示为
+  `天 HH:MM:SS` / `MM-DD HH:MM:SS`。采集输出限制 512KB、超时 6s，同一 runtime 的
+  并发请求共享一次执行；断开连接时清理基线。面板默认显示，工具栏波形按钮或
+  `Ctrl+Shift+U` 开关，快速命令栏位于其上方不受影响；浏览器演示模式回退到模拟
+  数据。新增 6 个解析单测与 2 个 SSH 集成测试。
 - P9 完成（Linux）：`build/icon.{png,ico,icns}` 与 `build/icons/` 由 `scripts/gen-icon.py`
   生成，deb 安装 9 种 hicolor 尺寸。`electron-builder.yml` 增加 `electronFuses`
   （RunAsNode=false、Cookie 加密开启、NODE_OPTIONS/inspect 关闭、OnlyLoadAppFromAsar）

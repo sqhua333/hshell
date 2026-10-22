@@ -13,6 +13,7 @@ import { KeyboardDialog } from './components/KeyboardDialog'
 import { KeysDialog } from './components/KeysDialog'
 import { PasteConfirmDialog } from './components/PasteConfirmDialog'
 import { QuickCommandsDialog } from './components/QuickCommandsDialog'
+import { RemoteMonitor } from './components/RemoteMonitor'
 import { SessionDialog } from './components/SessionDialog'
 import { SessionSidebar } from './components/SessionSidebar'
 import { SftpPanel } from './components/SftpPanel'
@@ -28,6 +29,7 @@ export default function App(): ReactElement {
   const locale = useApp((state) => state.locale)
   const sidebarVisible = useApp((state) => state.sidebarVisible)
   const sftpVisible = useApp((state) => state.sftpVisible)
+  const monitorVisible = useApp((state) => state.monitorVisible)
 
   useEffect(() => {
     void useApp
@@ -218,6 +220,7 @@ export default function App(): ReactElement {
               </>
             ) : null}
           </Group>
+          {monitorVisible ? <RemoteMonitor /> : null}
         </main>
       </div>
       <StatusBar />

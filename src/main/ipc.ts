@@ -8,6 +8,7 @@ import {
   type IpcMainInvokeEvent
 } from 'electron'
 import { chmodSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { isAbsolute, join, resolve } from 'node:path'
 import os from 'node:os'
 import type { AppEvent, FileEntry, Folder, Session } from '@shared/types'
@@ -28,6 +29,8 @@ import { CredentialStore } from './storage/credential-store'
 import { LayoutStore } from './storage/layout-store'
 import { listSerialPorts, SerialManager } from './serial/manager'
 import { LocalShellManager } from './local/manager'
+import { TelnetManager } from './telnet/manager'
+import { FtpManager } from './ftp/manager'
 import { KeyService } from './ssh/key-service'
 import { KnownHosts } from './ssh/known-hosts'
 import { SshManager } from './ssh/manager'
@@ -87,6 +90,44 @@ function readTextFile(file: string, maxBytes: number): string {
   if (!stats.isFile()) throw new Error('请选择文件')
   if (stats.size > maxBytes) throw new Error('文件过大，已取消导入')
   return readFileSync(file, 'utf8')
+}
+
+/** Drive roots for the Windows "This PC" view. */
+function listDrives(): FileEntry[] {
+  if (process.platform !== 'win32') return []
+  const letters = new Set<string>()
+  try {
+    const output = execFileSync('fsutil', ['fsinfo', 'drives'], {
+      encoding: 'utf8',
+      windowsHide: true
+    })
+    for (const match of output.matchAll(/([A-Za-z]):\\/g)) letters.add(match[1].toUpperCase())
+  } catch {
+    // fsutil can be unavailable on stripped-down systems; probe letters instead.
+  }
+  if (letters.size === 0) {
+    for (let code = 65; code <= 90; code += 1) {
+      const letter = String.fromCharCode(code)
+      if (isDirectory(`${letter}:\\`)) letters.add(letter)
+    }
+  }
+  return [...letters].sort().map((letter) => {
+    const root = `${letter}:\\`
+    let stats: ReturnType<typeof statSync> | null = null
+    try {
+      stats = statSync(root)
+    } catch {
+      stats = null
+    }
+    return {
+      name: `${letter}:`,
+      path: root,
+      type: 'directory',
+      size: 0,
+      mtime: stats?.mtimeMs ?? 0,
+      mode: stats?.mode ?? 0
+    } as FileEntry
+  })
 }
 
 function localList(path: string): FileEntry[] {
@@ -191,6 +232,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   )
   const serial = new SerialManager(emit, zmodemHost, join(userData, 'logs'))
   const local = new LocalShellManager(emit)
+  const telnet = new TelnetManager(emit, join(userData, 'logs'))
+  const ftp = new FtpManager(emit)
 
   const assertSender = (event: IpcMainInvokeEvent): void => {
     const win = getWindow()
@@ -396,31 +439,47 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
       return
     }
     const session = attachStoredCredentials(parsed.session, credentials)
+    if (session.connectionType === 'telnet') {
+      await telnet.connect({ ...parsed, session })
+      return
+    }
+    if (session.connectionType === 'ftp') {
+      await ftp.connect({ ...parsed, session })
+      return
+    }
     await ssh.connect({ ...parsed, session })
   })
-  // Serial and local runtimes use the same channels; dispatch by ownership.
+  // All terminal backends share these channels; dispatch by ownership.
   handle('ssh:disconnect', (runtimeId: string) => {
     const id = String(runtimeId)
     if (local.has(id)) local.disconnect(id)
     else if (serial.has(id)) serial.disconnect(id)
+    else if (telnet.has(id)) telnet.disconnect(id)
+    else if (ftp.has(id)) ftp.disconnect(id)
     else ssh.disconnect(id)
   })
   handle('ssh:write', (runtimeId: string, data: string) => {
     const id = String(runtimeId)
     if (local.has(id)) local.write(id, String(data))
     else if (serial.has(id)) serial.write(id, String(data))
+    else if (telnet.has(id)) telnet.write(id, String(data))
+    else if (ftp.has(id)) ftp.write(id, String(data))
     else ssh.write(id, String(data))
   })
   handle('ssh:resize', (runtimeId: string, cols: number, rows: number) => {
     const id = String(runtimeId)
     if (local.has(id)) local.resize(id, Number(cols), Number(rows))
     else if (serial.has(id)) serial.resize(id, Number(cols), Number(rows))
+    else if (telnet.has(id)) telnet.resize(id, Number(cols), Number(rows))
+    else if (ftp.has(id)) ftp.resize(id, Number(cols), Number(rows))
     else ssh.resize(id, Number(cols), Number(rows))
   })
   handle('ssh:ack', (runtimeId: string, bytes: number) => {
     const id = String(runtimeId)
     if (local.has(id)) local.ack(id, Number(bytes))
     else if (serial.has(id)) serial.ack(id, Number(bytes))
+    else if (telnet.has(id)) telnet.ack(id, Number(bytes))
+    else if (ftp.has(id)) ftp.ack(id, Number(bytes))
     else ssh.ack(id, Number(bytes))
   })
   handle('ssh:hostKeyDecision', (requestId: string, accept: boolean) =>
@@ -436,6 +495,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   handle('ssh:keyboardInteractive', (requestId: string, responses?: string[], cancel?: boolean) =>
     ssh.keyboardInteractive(String(requestId), responses, cancel)
   )
+  handle('monitor:sample', (runtimeId: string) => ssh.sampleMonitor(String(runtimeId)))
 
   handle('sftp:home', (runtimeId: string) => ssh.sftpHome(String(runtimeId)))
   handle('sftp:startDir', (runtimeId: string) => ssh.sftpStartDir(String(runtimeId)))
@@ -478,6 +538,49 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     ssh.cancelTransfer(String(transferId))
   })
 
+  handle('ftp:home', (runtimeId: string) => ftp.home(String(runtimeId)))
+  handle('ftp:startDir', (runtimeId: string) => ftp.startDir(String(runtimeId)))
+  handle('ftp:list', (runtimeId: string, path: string) =>
+    ftp.list(String(runtimeId), String(path))
+  )
+  handle('ftp:mkdir', (runtimeId: string, path: string) =>
+    ftp.mkdir(String(runtimeId), String(path))
+  )
+  handle('ftp:remove', (runtimeId: string, path: string, isDir: boolean) =>
+    ftp.remove(String(runtimeId), String(path), Boolean(isDir))
+  )
+  handle('ftp:rename', (runtimeId: string, from: string, to: string) =>
+    ftp.rename(String(runtimeId), String(from), String(to))
+  )
+  handle('ftp:chmod', (runtimeId: string, path: string, mode: number) =>
+    ftp.chmod(String(runtimeId), String(path), Number(mode))
+  )
+  handle(
+    'ftp:upload',
+    (runtimeId: string, localPaths: string[], remoteDir: string, transferId?: string) => {
+      if (!Array.isArray(localPaths)) throw new Error('本地路径无效')
+      return ftp.upload(
+        String(runtimeId),
+        localPaths.map(assertAbsolute),
+        String(remoteDir),
+        optionalTransferId(transferId)
+      )
+    }
+  )
+  handle(
+    'ftp:download',
+    (runtimeId: string, remotePaths: string[], localDir: string, transferId?: string) => {
+      if (!Array.isArray(remotePaths)) throw new Error('远程路径无效')
+      return ftp.download(
+        String(runtimeId),
+        remotePaths.map(String),
+        assertAbsolute(localDir),
+        optionalTransferId(transferId)
+      )
+    }
+  )
+  handle('ftp:cancel', (transferId: string) => ftp.cancel(String(transferId)))
+
   handle('tunnels:start', (input: unknown) => ssh.startTunnel(tunnelConfigSchema.parse(input)))
   handle('tunnels:stop', (id: string) => ssh.stopTunnel(String(id)))
   handle('tunnels:list', (runtimeId: string) => ssh.listTunnels(String(runtimeId)))
@@ -487,6 +590,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
 
   handle('fs:home', () => os.homedir())
   handle('fs:startDir', () => localStartDir())
+  handle('fs:drives', () => listDrives())
   handle('fs:list', (path: string) => localList(String(path)))
   handle('fs:mkdir', (path: string) => {
     mkdirSync(assertAbsolute(path))

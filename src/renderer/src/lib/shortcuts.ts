@@ -12,6 +12,7 @@ export type ShortcutAction =
   | 'edit:clear'
   | 'view:sidebar'
   | 'view:sftp'
+  | 'view:monitor'
   | 'view:theme'
   | 'ssh:reconnect'
   | 'ssh:disconnect'
@@ -92,6 +93,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
     items: [
       { combo: 'mod+b', action: 'view:sidebar', label: '显示/隐藏会话管理器', labelEn: 'Toggle session manager', display: 'Ctrl+B' },
       { combo: 'mod+shift+e', action: 'view:sftp', label: '显示/隐藏 SFTP 面板', labelEn: 'Toggle SFTP panel', display: 'Ctrl+Shift+E' },
+      { combo: 'mod+shift+u', action: 'view:monitor', label: '显示/隐藏远程监控', labelEn: 'Toggle remote monitoring', display: 'Ctrl+Shift+U' },
       { combo: 'mod+=', action: 'font:inc', label: '放大终端字体', labelEn: 'Increase font size', display: 'Ctrl++' },
       { combo: 'mod+-', action: 'font:dec', label: '缩小终端字体', labelEn: 'Decrease font size', display: 'Ctrl+-' },
       { combo: 'mod+0', action: 'font:reset', label: '重置终端字体', labelEn: 'Reset font size', display: 'Ctrl+0' },

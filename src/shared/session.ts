@@ -21,11 +21,29 @@ export function isLocalSession(
   return session?.connectionType === 'local'
 }
 
-/** SFTP, port forwarding and public-key installation require an SSH session. */
+export function isTelnetSession(
+  session: Pick<Session, 'connectionType'> | null | undefined
+): boolean {
+  return session?.connectionType === 'telnet'
+}
+
+/** A file-transfer-only session; it has no terminal. */
+export function isFtpSession(
+  session: Pick<Session, 'connectionType'> | null | undefined
+): boolean {
+  return session?.connectionType === 'ftp'
+}
+
+/** SFTP, port forwarding, remote monitoring and key installation need SSH. */
 export function isNonSshSession(
   session: Pick<Session, 'connectionType'> | null | undefined
 ): boolean {
-  return isSerialSession(session) || isLocalSession(session)
+  return (
+    isSerialSession(session) ||
+    isLocalSession(session) ||
+    isTelnetSession(session) ||
+    isFtpSession(session)
+  )
 }
 
 /** `8N1` style framing description. */
@@ -44,5 +62,12 @@ export function sessionTarget(session: Session): string {
   // A local shell has no destination; its tab name (e.g. "本地终端 2") is the
   // only meaningful label.
   if (isLocalSession(session)) return session.name
+  // Telnet logs in inside the terminal, so a username is optional there.
+  if (isTelnetSession(session)) return `${session.host}:${session.port}`
+  if (isFtpSession(session)) {
+    return session.username
+      ? `${session.username}@${session.host}:${session.port}`
+      : `${session.host}:${session.port}`
+  }
   return `${session.username}@${session.host}:${session.port}`
 }

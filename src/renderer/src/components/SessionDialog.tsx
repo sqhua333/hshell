@@ -127,6 +127,8 @@ function SessionDialogInner({
       .filter((jump) => jump.auth?.method === 'password' && jump.auth.savePassword)
       .map((jump) => jump.id)
   )
+  const [autoLogin, setAutoLogin] = useState(initial?.telnet?.autoLogin ?? false)
+  const [ftpSecure, setFtpSecure] = useState(initial?.ftp?.secure ?? false)
   const [serialPath, setSerialPath] = useState(initial?.serial?.path ?? '')
   const [serialPorts, setSerialPorts] = useState<SerialPortInfo[]>([])
   const [portListNonce, setPortListNonce] = useState(0)
@@ -246,9 +248,12 @@ function SessionDialogInner({
     const serialValue = serialPath.trim()
     const baudValue = Number(baudRate)
     const isSerial = connectionType === 'serial'
+    const isTelnet = connectionType === 'telnet'
+    const isFtp = connectionType === 'ftp'
+    const needsHost = isTelnet || isFtp || connectionType === 'ssh'
 
     const cleanJumps: JumpHostConfig[] = []
-    if (!isSerial) {
+    if (connectionType === 'ssh') {
       for (const [index, jump] of jumpHosts.entries()) {
         const jumpHost = jump.host.trim()
         const jumpPort = Number(jump.port)
@@ -340,15 +345,21 @@ function SessionDialogInner({
         setError(tr('波特率必须是 50 到 4000000 之间的整数', 'Baud rate must be an integer between 50 and 4000000'))
         return
       }
-    } else {
+    } else if (needsHost) {
       if (!hostValue) {
         setTab('connection')
         setError(tr('请输入主机地址', 'Please enter a host address'))
         return
       }
-      if (!userValue) {
+      // Telnet logs in from the terminal, so its username is optional.
+      if (connectionType === 'ssh' && !userValue) {
         setTab('connection')
         setError(tr('请输入用户名', 'Please enter a username'))
+        return
+      }
+      if (isFtp && !userValue) {
+        setTab('connection')
+        setError(tr('请输入 FTP 用户名', 'Please enter an FTP username'))
         return
       }
       if (!Number.isInteger(portValue) || portValue < 1 || portValue > 65535) {
@@ -356,14 +367,27 @@ function SessionDialogInner({
         setError(tr('端口必须是 1 到 65535 之间的整数', 'Port must be an integer between 1 and 65535'))
         return
       }
-      if (method === 'key' && !keyId && !keyPath.trim()) {
+      if (connectionType === 'ssh' && method === 'key' && !keyId && !keyPath.trim()) {
         setTab('auth')
         setError(tr('请选择保险库密钥或私钥文件', 'Choose a vault key or a private key file'))
         return
       }
-      if (method === 'password' && savePassword && !password && !initial?.auth.savePassword) {
+      if (
+        connectionType === 'ssh' &&
+        method === 'password' &&
+        savePassword &&
+        !password &&
+        !initial?.auth.savePassword
+      ) {
         setTab('auth')
         setError(tr('请先输入要保存的密码', 'Enter the password you want to save'))
+        return
+      }
+      if (isTelnet && autoLogin && savePassword && !password && !initial?.auth.savePassword) {
+        setTab('connection')
+        setError(
+          tr('自动登录并保存密码时，请先输入密码', 'Enter a password to save it for automatic login')
+        )
         return
       }
     }
@@ -423,8 +447,15 @@ function SessionDialogInner({
             rts
           }
         : undefined,
+      telnet: isTelnet
+        ? {
+            autoLogin: autoLogin || undefined,
+            terminalType: initial?.telnet?.terminalType
+          }
+        : undefined,
+      ftp: isFtp ? { secure: ftpSecure || undefined } : undefined,
       proxyJump:
-        isSerial || cleanJumps.length === 0
+        connectionType !== 'ssh' || cleanJumps.length === 0
           ? null
           : formatProxyJump(
               cleanJumps.map((jump) => ({
@@ -433,21 +464,30 @@ function SessionDialogInner({
                 username: jump.username || undefined
               }))
             ),
-      jumpHosts: !isSerial && cleanJumps.length > 0 ? cleanJumps : undefined,
+      jumpHosts:
+        connectionType === 'ssh' && cleanJumps.length > 0 ? cleanJumps : undefined,
       auth: isSerial
         ? { method: 'agent' }
-        : {
-            method,
-            keyPath: method === 'key' && !keyId ? keyPath.trim() : undefined,
-            keyId: method === 'key' && keyId ? keyId : undefined,
-            password:
-              method === 'password'
-                ? password
-                : method === 'key' && !keyId && passphrase
-                  ? passphrase
-                  : undefined,
-            savePassword: method === 'password' ? savePassword : undefined
-          },
+        : isTelnet
+          ? {
+              method: 'password',
+              password: autoLogin ? password : undefined,
+              savePassword: autoLogin ? savePassword : undefined
+            }
+          : isFtp
+            ? { method: 'password', password, savePassword }
+            : {
+                method,
+                keyPath: method === 'key' && !keyId ? keyPath.trim() : undefined,
+                keyId: method === 'key' && keyId ? keyId : undefined,
+                password:
+                  method === 'password'
+                    ? password
+                    : method === 'key' && !keyId && passphrase
+                      ? passphrase
+                      : undefined,
+                savePassword: method === 'password' ? savePassword : undefined
+              },
       terminal: {
         term: initial?.terminal.term ?? 'xterm-256color',
         theme: legacyThemeForScheme(colorScheme),
@@ -487,14 +527,20 @@ function SessionDialogInner({
   const updateHighlight = (id: string, patch: Partial<HighlightRule>): void =>
     setHighlights((list) => list.map((item) => (item.id === id ? { ...item, ...patch } : item)))
 
+  // FTP has no terminal or command automation; its credentials live in the
+  // connection sheet. Telnet logs in from the terminal, so it skips Auth too.
   const navItems: Array<{ id: SheetTab; label: string; icon: string }> = [
     { id: 'connection', label: tr('连接', 'Connection'), icon: 'server' },
-    ...(connectionType === 'serial'
+    ...(connectionType === 'ssh'
+      ? [{ id: 'auth' as const, label: tr('身份验证', 'Authentication'), icon: 'key' }]
+      : []),
+    ...(connectionType === 'ftp'
       ? []
-      : [{ id: 'auth' as const, label: tr('身份验证', 'Authentication'), icon: 'key' }]),
-    { id: 'terminal', label: tr('终端', 'Terminal'), icon: 'terminal' },
-    { id: 'automation', label: tr('自动化', 'Automation'), icon: 'trigger' },
-    { id: 'advanced', label: tr('高级', 'Advanced'), icon: 'settings' }
+      : [
+          { id: 'terminal' as const, label: tr('终端', 'Terminal'), icon: 'terminal' },
+          { id: 'automation' as const, label: tr('自动化', 'Automation'), icon: 'trigger' },
+          { id: 'advanced' as const, label: tr('高级', 'Advanced'), icon: 'settings' }
+        ])
   ]
 
   return (
@@ -503,9 +549,26 @@ function SessionDialogInner({
       subtitle={
         initial
           ? initial.name
-          : connectionType === 'serial'
-            ? tr('配置一个新的串口连接', 'Configure a new serial connection')
-            : tr('配置一个新的 SSH 连接', 'Configure a new SSH connection')
+          : tr(
+              `配置一个新的${
+                connectionType === 'serial'
+                  ? '串口'
+                  : connectionType === 'telnet'
+                    ? ' Telnet '
+                    : connectionType === 'ftp'
+                      ? ' FTP '
+                      : ' SSH '
+              }连接`,
+              `Configure a new ${
+                connectionType === 'serial'
+                  ? 'serial'
+                  : connectionType === 'telnet'
+                    ? 'Telnet'
+                    : connectionType === 'ftp'
+                      ? 'FTP'
+                      : 'SSH'
+              } connection`
+            )
       }
       width={720}
       onClose={closeSessionDialog}
@@ -582,11 +645,25 @@ function SessionDialogInner({
                     value={connectionType}
                     onChange={(event) => {
                       const next = event.target.value as ConnectionType
+                      const defaults: Partial<Record<ConnectionType, string>> = {
+                        ssh: '22',
+                        telnet: '23',
+                        ftp: '21'
+                      }
                       setConnectionType(next)
-                      if (next === 'serial') setTab('connection')
+                      setTab('connection')
+                      // Only replace a port that still looks like a protocol
+                      // default; a custom port the user typed is preserved.
+                      setPort((current) =>
+                        !current || ['22', '23', '21'].includes(current)
+                          ? defaults[next] ?? current
+                          : current
+                      )
                     }}
                   >
                     <option value="ssh">SSH</option>
+                    <option value="telnet">Telnet</option>
+                    <option value="ftp">FTP</option>
                     <option value="serial">UART</option>
                   </select>
                 </label>
@@ -619,6 +696,139 @@ function SessionDialogInner({
                         onChange={(event) => setUsername(event.target.value)}
                         placeholder="root"
                       />
+                    </label>
+                  </>
+                ) : connectionType === 'telnet' ? (
+                  <>
+                    <label className="field">
+                      <span>{tr('主机', 'Host')}</span>
+                      <input
+                        className="input"
+                        value={host}
+                        onChange={(event) => setHost(event.target.value)}
+                        placeholder={tr('127.0.0.1 或 example.com', '127.0.0.1 or example.com')}
+                        spellCheck={false}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>{tr('端口', 'Port')}</span>
+                      <input
+                        className="input"
+                        value={port}
+                        onChange={(event) => setPort(event.target.value)}
+                        inputMode="numeric"
+                      />
+                    </label>
+                    <label className="field">
+                      <span>{tr('用户名（可选）', 'Username (optional)')}</span>
+                      <input
+                        className="input"
+                        value={username}
+                        onChange={(event) => setUsername(event.target.value)}
+                        placeholder={tr('在终端中手动登录时留空', 'Leave empty to log in from the terminal')}
+                      />
+                    </label>
+                    <label className="check-row">
+                      <input
+                        type="checkbox"
+                        checked={autoLogin}
+                        onChange={(event) => setAutoLogin(event.target.checked)}
+                      />
+                      {tr(
+                        '检测到登录提示时自动发送用户名和密码',
+                        'Send the username and password when the host prompts for them'
+                      )}
+                    </label>
+                    {autoLogin ? (
+                      <>
+                        <label className="field">
+                          <span>{tr('密码', 'Password')}</span>
+                          <input
+                            className="input"
+                            type="password"
+                            value={password}
+                            onChange={(event) => setPassword(event.target.value)}
+                            placeholder={
+                              initial?.auth.savePassword
+                                ? tr('已保存；留空保持不变', 'Saved; leave blank to keep it')
+                                : tr('仅保存在内存中', 'Kept in memory only')
+                            }
+                          />
+                        </label>
+                        <label className="check-row">
+                          <input
+                            type="checkbox"
+                            checked={savePassword}
+                            onChange={(event) => setSavePassword(event.target.checked)}
+                          />
+                          {tr('保存密码（本机加密存储）', 'Save password (encrypted locally)')}
+                        </label>
+                      </>
+                    ) : null}
+                  </>
+                ) : connectionType === 'ftp' ? (
+                  <>
+                    <label className="field">
+                      <span>{tr('主机', 'Host')}</span>
+                      <input
+                        className="input"
+                        value={host}
+                        onChange={(event) => setHost(event.target.value)}
+                        placeholder={tr('ftp.example.com', 'ftp.example.com')}
+                        spellCheck={false}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>{tr('端口', 'Port')}</span>
+                      <input
+                        className="input"
+                        value={port}
+                        onChange={(event) => setPort(event.target.value)}
+                        inputMode="numeric"
+                      />
+                    </label>
+                    <label className="field">
+                      <span>{tr('用户名', 'Username')}</span>
+                      <input
+                        className="input"
+                        value={username}
+                        onChange={(event) => setUsername(event.target.value)}
+                        placeholder={tr('anonymous 或站点账号', 'anonymous or your account')}
+                        spellCheck={false}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>{tr('密码', 'Password')}</span>
+                      <input
+                        className="input"
+                        type="password"
+                        value={password}
+                        onChange={(event) => setPassword(event.target.value)}
+                        placeholder={
+                          initial?.auth.savePassword
+                            ? tr('已保存；留空保持不变', 'Saved; leave blank to keep it')
+                            : tr('仅保存在内存中', 'Kept in memory only')
+                        }
+                      />
+                    </label>
+                    <label className="check-row">
+                      <input
+                        type="checkbox"
+                        checked={savePassword}
+                        onChange={(event) => setSavePassword(event.target.checked)}
+                      />
+                      {tr('保存密码（本机加密存储）', 'Save password (encrypted locally)')}
+                    </label>
+                    <label className="check-row">
+                      <input
+                        type="checkbox"
+                        checked={ftpSecure}
+                        onChange={(event) => setFtpSecure(event.target.checked)}
+                      />
+                      {tr(
+                        '使用 FTPS（AUTH TLS 显式加密）',
+                        'Use FTPS (explicit AUTH TLS)'
+                      )}
                     </label>
                   </>
                 ) : (
@@ -982,10 +1192,20 @@ function SessionDialogInner({
                       '串口参数保存在本地。设备路径可直接输入，也可从下拉列表中选择；Linux 下若提示权限不足，请把当前用户加入 dialout 组。',
                       'Serial settings are stored locally. Type the device path or pick one from the list. On Linux, add your user to the dialout group if access is denied.'
                     )
-                  : tr(
-                      '连接信息会保存到本地；密码默认只留在内存，可在「身份验证」或各跳板机中勾选加密保存。跳板机按列表顺序逐跳连接，每跳可使用独立账号与认证方式。',
-                      'Connection details are stored locally. Passwords stay in memory unless you enable encrypted saving under Authentication or on a jump host. Hops connect in list order and may use their own accounts and authentication.'
-                    )}
+                  : connectionType === 'telnet'
+                    ? tr(
+                        'Telnet 以明文传输，仅建议在受信任的内网使用。默认在终端中手动输入账号密码；开启自动登录后，HShell 会在检测到 login/password 提示时发送上面的凭据。',
+                        'Telnet is unencrypted; use it only on trusted networks. By default you type credentials in the terminal. With automatic login, HShell sends the credentials above when it sees a login/password prompt.'
+                      )
+                    : connectionType === 'ftp'
+                      ? tr(
+                          'FTP 会话打开双栏文件管理器，不提供终端。密码默认只留在内存，可勾选加密保存；FTPS 通过 AUTH TLS 加密控制连接与数据传输。',
+                          'An FTP session opens a two-pane file manager instead of a terminal. Passwords stay in memory unless saved; FTPS encrypts the control and data connections with AUTH TLS.'
+                        )
+                      : tr(
+                          '连接信息会保存到本地；密码默认只留在内存，可在「身份验证」或各跳板机中勾选加密保存。跳板机按列表顺序逐跳连接，每跳可使用独立账号与认证方式。',
+                          'Connection details are stored locally. Passwords stay in memory unless you enable encrypted saving under Authentication or on a jump host. Hops connect in list order and may use their own accounts and authentication.'
+                        )}
               </div>
             </>
           ) : null}

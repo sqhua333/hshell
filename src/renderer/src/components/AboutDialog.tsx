@@ -5,6 +5,15 @@ import { useApp } from '../store'
 import { Icon } from './Icon'
 import { Modal } from './Modal'
 
+/** Render the build timestamp in local time: YYYY-MM-DD HH:MM:SS. */
+function formatBuildTime(): string {
+  if (typeof __BUILD_TIME__ !== 'string' || __BUILD_TIME__ === '') return '—'
+  const date = new Date(__BUILD_TIME__)
+  if (Number.isNaN(date.getTime())) return '—'
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
 export function AboutDialog(): ReactElement | null {
   const open = useApp((state) => state.aboutOpen)
   const setOpen = useApp((state) => state.setAboutOpen)
@@ -39,6 +48,10 @@ export function AboutDialog(): ReactElement | null {
         <div className="kv">
           <span>{tr('运行模式', 'Runtime')}</span>
           <code>{isElectron ? tr('Electron 桌面端', 'Electron desktop') : tr('浏览器演示模式', 'Browser demo')}</code>
+        </div>
+        <div className="kv">
+          <span>{tr('编译时间', 'Build time')}</span>
+          <code>{formatBuildTime()}</code>
         </div>
         <div className="kv">
           <span>{tr('技术栈', 'Stack')}</span>

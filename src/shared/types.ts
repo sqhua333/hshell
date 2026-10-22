@@ -83,8 +83,24 @@ export interface LoggingOptions {
   timestamps?: boolean
 }
 
-/** `local` runs the current system's default shell in an embedded PTY. */
-export type ConnectionType = 'ssh' | 'serial' | 'local'
+/**
+ * `local` runs the current system's default shell in an embedded PTY.
+ * `telnet` is a raw TCP terminal with telnet option negotiation; `ftp` is a
+ * file-transfer-only session (no terminal).
+ */
+export type ConnectionType = 'ssh' | 'serial' | 'local' | 'telnet' | 'ftp'
+
+export interface TelnetOptions {
+  /** Send the configured username/password when the host prompts for them. */
+  autoLogin?: boolean
+  /** Terminal type reported through TTYPE. Defaults to the session `term`. */
+  terminalType?: string
+}
+
+export interface FtpOptions {
+  /** Explicit FTPS: upgrade the control connection with AUTH TLS. */
+  secure?: boolean
+}
 
 export type SerialParity = 'none' | 'even' | 'odd' | 'mark' | 'space'
 export type SerialFlowControl = 'none' | 'rtscts' | 'xonxoff'
@@ -127,6 +143,10 @@ export interface Session {
   connectionType?: ConnectionType
   /** Present when `connectionType` is `serial`. */
   serial?: SerialOptions
+  /** Present when `connectionType` is `telnet`. */
+  telnet?: TelnetOptions
+  /** Present when `connectionType` is `ftp`. */
+  ftp?: FtpOptions
   /** ProxyJump target, e.g. `bastion` or `user@bastion:2222`. */
   proxyJump?: string | null
   /**
@@ -322,6 +342,32 @@ export interface ConnectRequest {
   rows: number
 }
 
+/**
+ * One reading of the remote host's resource usage, sampled from `/proc` and
+ * `df`. Sizes are bytes; network values are bytes per second.
+ */
+export interface RemoteMonitorSample {
+  /** Percent of all cores, 0–100. The first sample reports 0 until a delta exists. */
+  cpu: number
+  cores: number
+  /** 1-minute load average. */
+  load: number
+  memTotal: number
+  memUsed: number
+  swapTotal: number
+  swapUsed: number
+  diskTotal: number
+  diskUsed: number
+  netDown: number
+  netUp: number
+  /** Seconds since boot. */
+  uptime: number
+  /** Epoch milliseconds of the boot time, using the remote host's clock. */
+  bootTime: number
+  /** Epoch milliseconds when the sample was taken (remote clock). */
+  timestamp: number
+}
+
 export type KeyAlgorithm = 'rsa' | 'ecdsa' | 'ed25519'
 
 export interface KeyMetadata {
@@ -443,6 +489,28 @@ export interface HshellApi {
   serial: {
     list(): Promise<SerialPortInfo[]>
   }
+  ftp: {
+    home(runtimeId: string): Promise<string>
+    startDir(runtimeId: string): Promise<string>
+    list(runtimeId: string, path: string): Promise<FileEntry[]>
+    mkdir(runtimeId: string, path: string): Promise<void>
+    remove(runtimeId: string, path: string, isDir: boolean): Promise<void>
+    rename(runtimeId: string, from: string, to: string): Promise<void>
+    chmod(runtimeId: string, path: string, mode: number): Promise<void>
+    upload(
+      runtimeId: string,
+      localPaths: string[],
+      remoteDir: string,
+      transferId?: string
+    ): Promise<void>
+    download(
+      runtimeId: string,
+      remotePaths: string[],
+      localDir: string,
+      transferId?: string
+    ): Promise<void>
+    cancel(transferId: string): Promise<void>
+  }
   recording: {
     /** Show a save dialog and write the generated replay script (mode 0600). */
     saveScript(content: string, defaultName?: string): Promise<RecordingSaveResult>
@@ -459,6 +527,10 @@ export interface HshellApi {
     /** Abandon an inline password prompt (Ctrl+C in the terminal). */
     cancelPassword(requestId: string): Promise<void>
     keyboardInteractive(requestId: string, responses?: string[], cancel?: boolean): Promise<void>
+  }
+  monitor: {
+    /** Sample CPU, memory, disk, network and uptime from an SSH session. */
+    sample(runtimeId: string): Promise<RemoteMonitorSample>
   }
   sftp: {
     home(runtimeId: string): Promise<string>
@@ -491,6 +563,8 @@ export interface HshellApi {
     home(): Promise<string>
     /** Desktop when it exists, otherwise home. */
     startDir(): Promise<string>
+    /** Drive roots for the Windows "This PC" view; empty elsewhere. */
+    drives(): Promise<FileEntry[]>
     list(path: string): Promise<FileEntry[]>
     mkdir(path: string): Promise<void>
     remove(path: string, isDir: boolean): Promise<void>

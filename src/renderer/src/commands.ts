@@ -143,6 +143,10 @@ export async function runAction(action: ShortcutAction | string): Promise<void> 
       break
     }
 
+    case 'view:monitor':
+      state.toggleMonitor()
+      break
+
     case 'view:theme':
       state.toggleUiTheme()
       break

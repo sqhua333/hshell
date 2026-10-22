@@ -5,7 +5,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { WebglAddon } from '@xterm/addon-webgl'
 import type { Session, TriggerRule } from '@shared/types'
-import { isLocalSession, isSerialSession, sessionTarget } from '@shared/session'
+import { isLocalSession, isSerialSession, isTelnetSession, sessionTarget } from '@shared/session'
 import { api } from '../api'
 import { resolveColorScheme } from '../lib/color-schemes'
 import { tr } from '../lib/i18n'
@@ -702,7 +702,9 @@ export function TerminalPane({
                   ? tr('无法打开串口设备', 'Could not open the serial device')
                   : isLocalSession(session)
                     ? tr('无法启动本地终端', 'Could not start the local shell')
-                    : tr('无法建立 SSH 连接', 'Could not establish an SSH connection'))}
+                    : isTelnetSession(session)
+                      ? tr('无法建立 Telnet 连接', 'Could not establish a Telnet connection')
+                      : tr('无法建立 SSH 连接', 'Could not establish an SSH connection'))}
             </p>
           </div>
           <div className="terminal-error-actions">

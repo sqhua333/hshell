@@ -123,6 +123,7 @@ interface AppState {
   sidebarAutoHide: boolean
   sidebarWidth: number
   sftpVisible: boolean
+  monitorVisible: boolean
   searchVisible: boolean
   searchFocusNonce: number
   uiTheme: 'light' | 'dark'
@@ -207,6 +208,7 @@ interface AppState {
   toggleSidebarAutoHide(): void
   setSidebarWidth(width: number): void
   toggleSftp(): void
+  toggleMonitor(): void
   setSearchVisible(visible: boolean): void
   focusSearch(): void
   toggleUiTheme(): void
@@ -389,6 +391,7 @@ export const useApp = create<AppState>((set, get) => ({
   sidebarAutoHide: readFlag('hshell.sidebarAutoHide', false),
   sidebarWidth: readSidebarWidth(),
   sftpVisible: false,
+  monitorVisible: readFlag('hshell.remoteMonitor', true),
   searchVisible: false,
   searchFocusNonce: 0,
   uiTheme: readTheme(),
@@ -412,7 +415,7 @@ export const useApp = create<AppState>((set, get) => ({
   folderParentId: null,
   keysOpen: false,
   tunnelsOpen: false,
-  appVersion: '0.1.0',
+  appVersion: '0.2.0',
   defaultUsername: 'root',
   locale: getLocale(),
 
@@ -1000,6 +1003,12 @@ export const useApp = create<AppState>((set, get) => ({
 
   toggleSftp() {
     set((state) => ({ sftpVisible: !state.sftpVisible }))
+  },
+
+  toggleMonitor() {
+    const next = !get().monitorVisible
+    writeFlag('hshell.remoteMonitor', next)
+    set({ monitorVisible: next })
   },
 
   setSearchVisible(visible) {
