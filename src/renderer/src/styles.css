@@ -1173,7 +1173,7 @@ kbd {
   display: flex;
   flex: none;
   flex-direction: column;
-  height: 102px;
+  height: 56px;
   border-top: 1px solid var(--border);
   background: var(--panel-2);
 }
@@ -1228,30 +1228,35 @@ kbd {
 }
 
 .monitor-body {
-  display: grid;
+  display: flex;
   flex: 1;
-  grid-template-columns: repeat(5, minmax(0, 190px)) minmax(150px, 210px);
-  gap: 14px;
-  justify-content: start;
+  align-items: center;
   min-height: 0;
-  padding: 6px 12px 7px;
+  padding: 0 12px;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .monitor-metric {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex: 0 1 auto;
+  align-items: baseline;
+  gap: 5px;
   min-width: 0;
+  padding: 0 14px;
+  overflow: hidden;
 }
 
-.monitor-metric-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 6px;
+.monitor-metric:first-child {
+  padding-left: 0;
+}
+
+.monitor-metric + .monitor-metric {
+  border-left: 1px solid var(--border);
 }
 
 .monitor-label {
+  flex: none;
   color: var(--muted);
   font-size: 10px;
   font-weight: 700;
@@ -1259,6 +1264,7 @@ kbd {
 }
 
 .monitor-value {
+  flex: none;
   color: var(--text);
   font-size: 13px;
   font-variant-numeric: tabular-nums;
@@ -1266,34 +1272,18 @@ kbd {
 }
 
 .monitor-sub {
+  min-width: 0;
   overflow: hidden;
   color: var(--muted);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.monitor-uptime {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  gap: 5px;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.monitor-uptime span {
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .monitor-empty {
   display: flex;
-  grid-column: 1 / -1;
+  flex: 1;
   align-items: center;
   justify-content: center;
   gap: 10px;
@@ -1313,67 +1303,6 @@ kbd {
 
 :root[data-theme='dark'] .monitor-error-badge {
   color: #f87171;
-}
-
-.monitor-chart {
-  display: flex;
-  align-items: flex-end;
-  gap: 2px;
-  height: 30px;
-}
-
-.monitor-bar {
-  flex: 1 1 0;
-  min-width: 1px;
-  border-radius: 1px 1px 0 0;
-}
-
-.monitor-chart.net {
-  align-items: stretch;
-}
-
-.monitor-net-col {
-  display: flex;
-  flex: 1 1 0;
-  flex-direction: column;
-  min-width: 1px;
-}
-
-.monitor-net-half {
-  display: flex;
-  flex: 1;
-  align-items: flex-end;
-  min-height: 0;
-}
-
-.monitor-net-half.bottom {
-  align-items: flex-start;
-}
-
-.monitor-net-half i {
-  display: block;
-  width: 100%;
-  border-radius: 1px;
-}
-
-.monitor-chart.disk {
-  align-items: center;
-}
-
-.monitor-disk-track {
-  display: block;
-  width: 100%;
-  height: 8px;
-  overflow: hidden;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--border) 70%, transparent);
-}
-
-.monitor-disk-track i {
-  display: block;
-  height: 100%;
-  border-radius: 4px;
-  background: linear-gradient(90deg, #fbbf24, #f59e0b);
 }
 
 /* ----------------------------------------------------------- statusbar */
