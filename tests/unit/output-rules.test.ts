@@ -123,4 +123,29 @@ describe('findHighlightLines', () => {
     const rules = [{ id: 're', pattern: '^fail', regex: true, caseSensitive: true }]
     expect(findHighlightLines('FAILED\nfailed', rules)).toHaveLength(1)
   })
+
+  it('matches any literal keyword separated by commas', () => {
+    const rules = [
+      {
+        id: 'multi',
+        pattern: 'ERROR, WARNING，fatal',
+        background: '#ff0000'
+      }
+    ]
+    expect(findHighlightLines('ERROR one\nWARNING two\nfatal three', rules)).toHaveLength(3)
+    expect(findHighlightLines('error is case-insensitive too', rules)).toHaveLength(1)
+    expect(findHighlightLines('all good', rules)).toEqual([])
+  })
+
+  it('keeps literal commas out of the alternation and escapes metacharacters', () => {
+    const rules = [{ id: 'literal', pattern: 'a.b,ERROR', background: '#ff0000' }]
+    expect(findHighlightLines('a.b', rules)).toHaveLength(1)
+    expect(findHighlightLines('axb', rules)).toEqual([])
+  })
+
+  it('does not split regex rules on commas', () => {
+    const rules = [{ id: 're', pattern: 'ERROR,WARNING', regex: true }]
+    expect(findHighlightLines('ERROR', rules)).toEqual([])
+    expect(findHighlightLines('ERROR,WARNING', rules)).toHaveLength(1)
+  })
 })

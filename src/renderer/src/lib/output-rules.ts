@@ -22,6 +22,20 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+/**
+ * Highlight literals may list several keywords separated by commas (ASCII or
+ * full-width), e.g. `ERROR,WARN，FATAL`. Regex rules are left untouched so
+ * quantifiers such as `a{1,3}` keep working.
+ */
+function highlightPatternSource(pattern: string): string {
+  const parts = pattern
+    .split(/[,，]/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+  if (parts.length === 0) return ''
+  return parts.map(escapeRegExp).join('|')
+}
+
 /** Compile a rule; invalid regular expressions are ignored instead of throwing. */
 export function ruleRegExp(rule: MatchableRule, global = false): RegExp | null {
   if (!rule.pattern) return null
@@ -29,6 +43,19 @@ export function ruleRegExp(rule: MatchableRule, global = false): RegExp | null {
   const flags = `${global ? 'g' : ''}${rule.caseSensitive ? '' : 'i'}`
   try {
     return new RegExp(source, flags)
+  } catch {
+    return null
+  }
+}
+
+/** Like `ruleRegExp`, but a literal highlight may contain several keywords. */
+function highlightRegExp(rule: HighlightRule): RegExp | null {
+  if (!rule.pattern) return null
+  if (rule.regex) return ruleRegExp(rule)
+  const source = highlightPatternSource(rule.pattern)
+  if (!source) return null
+  try {
+    return new RegExp(source, rule.caseSensitive ? '' : 'i')
   } catch {
     return null
   }
@@ -113,7 +140,7 @@ export function findHighlightLines(
     if (!line) continue
     for (const rule of rules) {
       if (rule.enabled === false) continue
-      const regexp = ruleRegExp(rule)
+      const regexp = highlightRegExp(rule)
       if (regexp?.test(line)) {
         result.push({ rule, lineFromEnd: lines.length - 1 - index })
         break

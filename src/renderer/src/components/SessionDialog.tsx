@@ -1196,8 +1196,8 @@ function SessionDialogInner({
               <div className="section-title">{tr('突出显示集', 'Highlight set')}</div>
               <div className="form-hint">
                 {tr(
-                  '当输出行匹配时，为整行添加背景色或文字色。规则按顺序匹配，每行只应用第一条命中的规则。',
-                  'When an output line matches, the whole line gets a background or text color. Rules are checked in order and the first match wins.'
+                  '当输出行匹配时，为整行添加背景色或文字色。非正则模式下可用逗号分隔多个关键词（如 ERROR,WARNING），任意一个命中即生效；匹配逗号本身请使用正则。规则按顺序匹配，每行只应用第一条命中的规则。',
+                  'When an output line matches, the whole line gets a background or text color. Without Regex, separate several keywords with commas (e.g. ERROR,WARNING); any one of them matches. Use a regex to match a literal comma. Rules are checked in order and the first match wins.'
                 )}
               </div>
               <div className="rule-list">
@@ -1207,7 +1207,7 @@ function SessionDialogInner({
                       className="input"
                       value={rule.pattern}
                       onChange={(event) => updateHighlight(rule.id, { pattern: event.target.value })}
-                      placeholder={tr('例如 ERROR、WARNING，或正则', 'For example ERROR, WARNING, or a regex')}
+                      placeholder={tr('例如 ERROR,WARNING，或正则', 'For example ERROR,WARNING, or a regex')}
                       spellCheck={false}
                     />
                     <label className="mini-check">
