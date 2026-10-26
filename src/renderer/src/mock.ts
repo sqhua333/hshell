@@ -129,7 +129,7 @@ function buildLocalTree(): Map<string, FileEntry> {
   add(`${HOME}/Desktop`, 'directory')
   add(`${HOME}/Documents`, 'directory')
   add(`${HOME}/Downloads`, 'directory')
-  add(`${HOME}/Downloads/hshell-0.2.2.AppImage`, 'file', 96468992)
+  add(`${HOME}/Downloads/hshell-0.2.3.AppImage`, 'file', 96468992)
   add(`${HOME}/Downloads/notes.md`, 'file', 2100)
   add(`${HOME}/Documents/需求说明.md`, 'file', 6400)
   add(`${HOME}/Documents/会议记录.txt`, 'file', 1800)
@@ -379,7 +379,7 @@ export function createMockApi(): HshellApi {
       setTheme: async () => undefined,
       info: async () => ({
         name: 'HShell',
-        version: '0.2.2-demo',
+        version: '0.2.3-demo',
         platform: 'web',
         userData: '',
         username: USERNAME

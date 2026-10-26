@@ -19,6 +19,7 @@ import { api } from './api'
 import { applyLocale, getLocale, tr, type Locale } from './lib/i18n'
 import { buildLayout, restoreLayout } from './lib/layout'
 import { localShellTitle } from './lib/local-session'
+import { TransferSpeedMeter } from './lib/transfer-speed'
 import {
   collectPanes,
   paneNode,
@@ -101,8 +102,16 @@ export interface SftpTransferProgress {
   fileName: string
   transferred: number
   total: number
+  /** Smoothed bytes per second; 0 until enough samples arrive. */
+  speed: number
   message?: string
 }
+
+/**
+ * Per-file sampling used to derive the transfer speed. Kept outside the store
+ * so timing does not force extra renders between progress events.
+ */
+const transferSpeed = new TransferSpeedMeter()
 
 interface AppState {
   ready: boolean
@@ -415,7 +424,7 @@ export const useApp = create<AppState>((set, get) => ({
   folderParentId: null,
   keysOpen: false,
   tunnelsOpen: false,
-  appVersion: '0.2.2',
+  appVersion: '0.2.3',
   defaultUsername: 'root',
   locale: getLocale(),
 
@@ -826,6 +835,15 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   setTransferProgress(runtimeId, update) {
+    const speed = transferSpeed.sample(
+      `${runtimeId}:${update.transferId}:${update.fileName}`,
+      update.phase === 'running',
+      update.transferred ?? 0
+    )
+    const finished =
+      update.phase === 'complete' || update.phase === 'cancelled' || update.phase === 'error'
+    // Complete events carry no file name, so drop every sample of this transfer.
+    if (finished) transferSpeed.clear(`${runtimeId}:${update.transferId}:`)
     set((state) => {
       const previous = state.transfers[runtimeId]
       const fileName = update.fileName || (previous?.transferId === update.transferId ? previous.fileName : '')
@@ -839,12 +857,13 @@ export const useApp = create<AppState>((set, get) => ({
             fileName,
             transferred: update.transferred,
             total: update.total,
+            speed,
             message: update.message
           }
         }
       }
     })
-    if (update.phase === 'complete' || update.phase === 'cancelled' || update.phase === 'error') {
+    if (finished) {
       const transferId = update.transferId
       setTimeout(() => get().clearTransfer(runtimeId, transferId), 5000)
     }

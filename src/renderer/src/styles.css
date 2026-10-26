@@ -2171,20 +2171,62 @@ kbd {
 
 .sftp-transfer-bar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 4px 10px;
+  flex-direction: column;
+  gap: 5px;
+  padding: 6px 10px 7px;
   border-bottom: 1px solid var(--border);
   background: var(--panel-alt, var(--panel));
   font-size: 12px;
   color: var(--accent);
 }
 
+.sftp-transfer-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
 .sftp-transfer-text {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.sftp-transfer-stats {
+  flex: none;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.sftp-transfer-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.sftp-transfer-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 120ms linear;
+}
+
+.sftp-transfer-bar.indeterminate .sftp-transfer-fill {
+  width: 30%;
+  animation: sftp-transfer-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes sftp-transfer-slide {
+  from {
+    margin-left: -30%;
+  }
+  to {
+    margin-left: 100%;
+  }
 }
 
 .status-section.status-transfer.clickable {

@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactElement } from 'react'
 import { sessionTarget } from '@shared/session'
 import { api, isElectron } from '../api'
+import { formatSpeed } from '../lib/format'
 import { tr } from '../lib/i18n'
 import { sessionForRuntime, useApp } from '../store'
 
@@ -68,6 +69,8 @@ export function StatusBar(): ReactElement {
       sftpTransfer.total > 0
         ? ` ${Math.min(100, Math.round((sftpTransfer.transferred / sftpTransfer.total) * 100))}%`
         : ''
+    const speed =
+      sftpTransfer.phase === 'running' ? formatSpeed(sftpTransfer.speed) : ''
     const phase =
       sftpTransfer.phase === 'complete'
         ? tr(' 完成', ' done')
@@ -76,7 +79,7 @@ export function StatusBar(): ReactElement {
           : sftpTransfer.phase === 'error'
             ? tr(' 失败', ' failed')
             : ''
-    return `${arrow} ${sftpTransfer.fileName || 'SFTP'}${percent}${phase}`
+    return `${arrow} ${sftpTransfer.fileName || 'SFTP'}${percent}${speed ? ` · ${speed}` : ''}${phase}`
   })()
   const transferHint =
     sftpTransfer?.phase === 'running' && sftpTransfer.fileName

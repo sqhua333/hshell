@@ -679,8 +679,8 @@ mac:
   属性中明确提示密码与内容可被窃听。
 - **FTP / FTPS**：会话协议可选 FTP，默认端口 21，基于 `basic-ftp`。会话打开后
   不创建终端，而是渲染文件管理器（复用 SFTP 双栏组件，`FileTransferPanel`
-  的 `protocol` 决定调用 `api.sftp` 还是 `api.ftp`）：浏览、上传 / 下载（进度、
-  取消）、新建目录、重命名、删除与 `SITE CHMOD`。FTP 运行时同样接入
+  的 `protocol` 决定调用 `api.sftp` 还是 `api.ftp`）：浏览、上传 / 下载（进度条、
+  速率、取消）、新建目录、重命名、删除与 `SITE CHMOD`。FTP 运行时同样接入
   `ssh:*` 的 connect / disconnect 与 `sftp:progress` 事件；取消传输会关闭控制
   连接，下一次操作自动重连。可选显式 FTPS（AUTH TLS），远程路径与控制字符校验
   防止命令注入。FTP 会话不显示 SFTP 面板、快速命令栏、远程监控与端口转发。

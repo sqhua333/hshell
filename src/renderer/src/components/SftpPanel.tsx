@@ -3,6 +3,7 @@ import { Group, Panel, Separator } from 'react-resizable-panels'
 import type { FileEntry } from '@shared/types'
 import { isNonSshSession } from '@shared/session'
 import { api } from '../api'
+import { formatBytes, formatSpeed } from '../lib/format'
 import { tr } from '../lib/i18n'
 import { sessionForRuntime, useApp } from '../store'
 import { Icon } from './Icon'
@@ -36,18 +37,6 @@ function joinPath(dir: string, name: string): string {
   }
   if (!dir || dir === '/') return `/${name}`
   return `${dir.replace(/\/+$/, '')}/${name}`
-}
-
-function formatSize(size: number): string {
-  if (!size) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let value = size
-  let unit = 0
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024
-    unit += 1
-  }
-  return `${value >= 10 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`
 }
 
 function newTransferId(): string {
@@ -105,7 +94,7 @@ function FileTable({ entries, selected, onSelect, onOpen }: FileTableProps): Rea
               {entry.type === 'directory' ? '/' : ''}
             </span>
             <span className="file-size">
-              {entry.type === 'directory' ? '—' : formatSize(entry.size)}
+              {entry.type === 'directory' ? '—' : formatBytes(entry.size)}
             </span>
             <span className="file-time">{formatDate(entry.mtime)}</span>
           </div>
@@ -719,25 +708,50 @@ export function FileTransferPanel({
     </div>
   )
 
-  const percent =
+  const percentValue =
     transfer && transfer.total > 0
-      ? `${Math.min(100, Math.round((transfer.transferred / transfer.total) * 100))}%`
+      ? Math.min(100, (transfer.transferred / transfer.total) * 100)
+      : 0
+  const percentText = transfer && transfer.total > 0 ? `${Math.round(percentValue)}%` : ''
+  const sizeText =
+    transfer && transfer.total > 0
+      ? `${formatBytes(transfer.transferred)} / ${formatBytes(transfer.total)}`
       : ''
+  const speedText = transfer?.phase === 'running' ? formatSpeed(transfer.speed) : ''
+  // Servers sometimes omit the size; fall back to an animated, indeterminate bar.
+  const indeterminate = transfer ? transfer.total <= 0 : false
 
   return (
     <div className="sftp-panel">
       {activeTransfer ? (
-        <div className="sftp-transfer-bar">
-          <span className="sftp-transfer-text">
-            {transfer
-              ? `${transfer.direction === 'upload' ? tr('↑ 上传', '↑ Upload') : tr('↓ 下载', '↓ Download')} ${
-                  transfer.fileName || '…'
-                } ${percent}`
-              : tr('正在传输…', 'Transferring…')}
-          </span>
-          <button className="btn btn-ghost" onClick={cancelTransfer}>
-            {tr('取消', 'Cancel')}
-          </button>
+        <div className={`sftp-transfer-bar${indeterminate ? ' indeterminate' : ''}`}>
+          <div className="sftp-transfer-row">
+            <span className="sftp-transfer-text">
+              {transfer
+                ? `${transfer.direction === 'upload' ? tr('↑ 上传', '↑ Upload') : tr('↓ 下载', '↓ Download')} ${
+                    transfer.fileName || '…'
+                  }`
+                : tr('正在传输…', 'Transferring…')}
+            </span>
+            <span className="sftp-transfer-stats">
+              {[sizeText, speedText, percentText].filter(Boolean).join(' · ')}
+            </span>
+            <button className="btn btn-ghost" onClick={cancelTransfer}>
+              {tr('取消', 'Cancel')}
+            </button>
+          </div>
+          <div
+            className="sftp-transfer-track"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={transfer && transfer.total > 0 ? Math.round(percentValue) : undefined}
+          >
+            <div
+              className="sftp-transfer-fill"
+              style={indeterminate ? undefined : { width: `${percentValue}%` }}
+            />
+          </div>
         </div>
       ) : null}
       <Group orientation="horizontal" className="sftp-panel-group">
