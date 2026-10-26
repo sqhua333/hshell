@@ -59,7 +59,7 @@ export function createMenu(locale: Language = 'zh'): void {
         { type: 'separator' },
         {
           label: en ? 'Find…' : '查找…',
-          accelerator: 'CmdOrCtrl+Shift+F',
+          accelerator: 'CmdOrCtrl+F',
           click: () => send('edit:find')
         }
       ]

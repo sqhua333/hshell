@@ -105,7 +105,7 @@ function Welcome(): ReactElement {
           <kbd>Ctrl+T</kbd> {tr('新建标签', 'New tab')}
         </span>
         <span>
-          <kbd>Ctrl+Shift+F</kbd> {tr('查找', 'Find')}
+          <kbd>Ctrl+F</kbd> {tr('查找', 'Find')}
         </span>
         <span>
           <kbd>F1</kbd> {tr('快捷键', 'Shortcuts')}

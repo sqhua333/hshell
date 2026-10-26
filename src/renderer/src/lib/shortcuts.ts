@@ -80,7 +80,9 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { combo: 'mod+insert', action: 'edit:copy', label: '复制选中内容', labelEn: 'Copy selection', display: 'Ctrl+Insert' },
       { combo: 'mod+shift+v', action: 'edit:paste', label: '粘贴', labelEn: 'Paste', display: 'Ctrl+Shift+V' },
       { combo: 'shift+insert', action: 'edit:paste', label: '粘贴', labelEn: 'Paste', display: 'Shift+Insert' },
-      { combo: 'mod+shift+f', action: 'edit:find', label: '在终端中查找', labelEn: 'Find in terminal', display: 'Ctrl+Shift+F' },
+      { combo: 'mod+f', action: 'edit:find', label: '在终端中查找', labelEn: 'Find in terminal', display: 'Ctrl+F' },
+      // Matches Windows Terminal's Clear Buffer default; plain Ctrl+L stays
+      // with the running program (bash/readline) as in other terminals.
       { combo: 'mod+shift+k', action: 'edit:clear', label: '清屏', labelEn: 'Clear screen', display: 'Ctrl+Shift+K' },
       { combo: 'mod+shift+s', action: 'pane:split-h', label: '水平分屏', labelEn: 'Split horizontally', display: 'Ctrl+Shift+S' },
       { combo: 'mod+shift+d', action: 'pane:split-v', label: '垂直分屏', labelEn: 'Split vertically', display: 'Ctrl+Shift+D' },

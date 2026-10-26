@@ -2,8 +2,8 @@
 /**
  * E2E for terminal copy/paste (headless Electron + CDP).
  *
- *  1. Right-click without a selection opens the menu; Copy is disabled.
- *  2. Right-click with a selection copies it and clears the selection.
+ *  1. Shift+right-click opens the menu; Copy is disabled without a selection.
+ *  2. Plain right-click pastes the clipboard into the shell without a menu.
  *  3. Ctrl+C with a selection copies without sending 0x03 to the shell;
  *     Ctrl+C without a selection sends SIGINT.
  *  4. Ctrl+V on multi-line text asks for confirmation and sends nothing until
@@ -212,13 +212,14 @@ const ui = (body) => `(async () => {
       .join('\\n')
   const focusTerminal = () =>
     document.querySelector('.tab-view.active .xterm-helper-textarea')?.focus()
-  const contextMenu = (x = 40, y = 40) => {
+  const contextMenu = (x = 40, y = 40, shiftKey = false) => {
     const pane = document.querySelector('.tab-view.active .terminal-pane')
     pane.dispatchEvent(new MouseEvent('contextmenu', {
       bubbles: true,
       cancelable: true,
       clientX: x,
-      clientY: y
+      clientY: y,
+      shiftKey
     }))
   }
   const menuItem = (label) =>
@@ -243,7 +244,7 @@ const ui = (body) => `(async () => {
     return false
   }
   const selectAll = async () => {
-    contextMenu()
+    contextMenu(40, 40, true)
     await waitFor(() => document.querySelector('.context-menu'), 'context menu')
     const item = menuItem('全选') ?? menuItem('Select all')
     if (!item) throw new Error('select-all menu item missing')
@@ -289,48 +290,38 @@ try {
   )
   if (!opened.text.includes(TARGET)) fail('shell output missing', opened)
 
-  // 1. No selection: right-click opens the menu with Copy disabled.
+  // 1. No selection: Shift+right-click opens the menu with Copy disabled.
   const menuState = await evaluate(
     ui(`
-      contextMenu()
+      contextMenu(40, 40, true)
       const menu = await waitFor(() => document.querySelector('.context-menu'), 'context menu')
       const copy = menuItem('复制') ?? menuItem('Copy')
-      return {
+      const state = {
         open: Boolean(menu),
         copyDisabled: Boolean(copy?.disabled),
         items: [...menu.querySelectorAll('.context-item')].map((item) => item.textContent)
       }
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await waitFor(() => !document.querySelector('.context-menu'), 'menu closed')
+      return state
     `)
   )
-  if (!menuState.open) fail('right-click did not open the menu', menuState)
+  if (!menuState.open) fail('Shift+right-click did not open the menu', menuState)
   if (!menuState.copyDisabled) fail('Copy is enabled without a selection', menuState)
   console.log('MENU_WITHOUT_SELECTION_OK')
 
-  // 2. Right-click with a selection copies it and clears the selection;
-  //    the menu stays closed.
-  const rightClickCopy = await evaluate(
+  // 2. Plain right-click pastes the clipboard; no menu appears.
+  const rightClickPaste = await evaluate(
     ui(`
-      await window.hshell.clipboard.writeText('clipboard-sentinel-right')
-      const item = menuItem('全选') ?? menuItem('Select all')
-      item.click()
-      await waitFor(() => hasSelection(), 'selection before right-click')
+      await window.hshell.clipboard.writeText('right-click-paste-42')
       contextMenu(60, 60)
-      await waitFor(() => hasCopyToast(), 'copy toast')
-      await waitFor(() => !hasSelection(), 'selection cleared after copy')
-      return {
-        menuOpen: Boolean(document.querySelector('.context-menu')),
-        clipboard: await window.hshell.clipboard.readText()
-      }
+      await sleep(400)
+      return { menuOpen: Boolean(document.querySelector('.context-menu')) }
     `)
   )
-  if (rightClickCopy.menuOpen) fail('right-click with a selection opened the menu', rightClickCopy)
-  if (
-    !rightClickCopy.clipboard.includes(TARGET) ||
-    rightClickCopy.clipboard.includes('clipboard-sentinel-right')
-  ) {
-    fail('right-click did not copy the selection', rightClickCopy)
-  }
-  console.log('RIGHT_CLICK_COPY_OK')
+  if (rightClickPaste.menuOpen) fail('plain right-click opened the menu', rightClickPaste)
+  await waitForReceived('right-click-paste-42', 'right-click paste')
+  console.log('RIGHT_CLICK_PASTE_OK')
 
   // 3a. Ctrl+C with a selection copies but does not send 0x03.
   const keyboardCopy = await evaluate(

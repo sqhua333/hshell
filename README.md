@@ -95,7 +95,7 @@ npm run mock:sshd      # 127.0.0.1:2222
   录制）。`Ctrl+W` 关闭当前分屏（只剩一个面板时关闭
   标签页），也可点击面板右上角的 ×；关闭分屏只结束该面板自己的连接，剩余面板按
   原比例自动合并。
-- **终端**：xterm.js、随窗口缩放、WebGL（仅可见 pane）、右键菜单、查找栏、ZMODEM。
+- **终端**：xterm.js、随窗口缩放、WebGL（仅可见 pane）、右键粘贴（Shift+右键菜单）、查找栏、ZMODEM。
 - **断线与重连**：15 秒一次的 SSH keepalive（连续 3 次无响应即判定链路失效）可发现
   设备掉电、拔网线等静默断开。传输层异常时按 1s→30s 指数退避自动重连，最多 8 次
   且总时长不超过约 2 分钟；超过任一上限后自动断开，终端显示「重新连接」按钮，不再
@@ -335,7 +335,7 @@ picocom -b 115200 /tmp/ttyB       # 或 cat /tmp/ttyB / echo hello > /tmp/ttyB
 | Ctrl+V | 粘贴（macOS 为 Cmd+V）；多行内容会先确认 |
 | Ctrl+Shift+C / Ctrl+Insert | 始终复制选中内容 |
 | Ctrl+Shift+V / Shift+Insert | 始终粘贴 |
-| Ctrl+Shift+F | 查找 |
+| Ctrl+F | 查找 |
 | Ctrl+Shift+R / Ctrl+Shift+W | 重连 / 断开 |
 | Ctrl+Shift+S / Ctrl+Shift+D | 水平 / 垂直分屏 |
 | Ctrl+B / Ctrl+Shift+E | 侧栏 / SFTP |
@@ -347,8 +347,8 @@ picocom -b 115200 /tmp/ttyB       # 或 cat /tmp/ttyB / echo hello > /tmp/ttyB
 
 终端复制/粘贴沿用 VS Code 终端的手感：有选中内容时 `Ctrl+C` 复制并清除选区，
 没有选中内容时照常发送 SIGINT；macOS 上 `Ctrl+C` 始终留给 shell，复制/粘贴使用
-`Cmd+C` / `Cmd+V`。右键有选中内容时直接复制、不弹菜单；没有选中内容时打开
-「复制 / 粘贴 / 全选 / 查找 / 清屏」菜单，按住 `Shift` 右键可随时强制打开菜单。
+`Cmd+C` / `Cmd+V`。右键直接粘贴；按住 `Shift` 右键打开
+「复制 / 粘贴 / 全选 / 查找 / 清屏」菜单。
 剪贴板包含换行时会先弹出预览确认，避免一次粘贴执行多条命令；支持括号粘贴模式
 （bracketed paste）的程序不会询问。复制成功会显示短暂提示。
 

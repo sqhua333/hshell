@@ -277,8 +277,8 @@ PaneNode { type:'pane', sessionId }
 所有快捷键统一由渲染进程的捕获阶段处理，并同步到原生菜单；xterm 通过
 `attachCustomKeyEventHandler` 让出这些组合键。终端复制/粘贴是上下文快捷键：
 Windows/Linux 下有选区时 Ctrl+C 复制并清除选区，无选区时仍发送 SIGINT；macOS 上
-Ctrl+C 始终留给 readline，复制/粘贴使用 Cmd+C / Cmd+V。右键有选区时直接复制、
-无选区时打开菜单（Shift+右键强制打开菜单）；多行粘贴在未启用括号粘贴
+Ctrl+C 始终留给 readline，复制/粘贴使用 Cmd+C / Cmd+V。右键直接粘贴，
+Shift+右键打开菜单；多行粘贴在未启用括号粘贴
 （bracketed paste）时先显示预览确认。Ctrl+Shift+C / Ctrl+Insert 与
 Ctrl+Shift+V / Shift+Insert 始终可用。
 
@@ -294,7 +294,7 @@ Ctrl+Shift+V / Shift+Insert 始终可用。
 | `Ctrl+V` | 粘贴；多行内容先确认（macOS 为 `Cmd+V`） |
 | `Ctrl+Shift+C` / `Ctrl+Insert` | 始终复制终端选中内容 |
 | `Ctrl+Shift+V` / `Shift+Insert` | 始终粘贴 |
-| `Ctrl+Shift+F` | 在终端中查找 |
+| `Ctrl+F` | 在终端中查找 |
 | `Ctrl+Shift+K` | 清屏 |
 | `Ctrl+Shift+R` | 重新连接当前会话 |
 | `Ctrl+Shift+W` | 断开当前连接（保留标签页） |
@@ -387,7 +387,7 @@ npm run dist:linux -- --dir     # 或 npx electron-builder --linux --dir
 - 密码 / 私钥 / agent / keyboard-interactive 认证。
 - TOFU host key 弹窗与拒绝逻辑。
 - 重连状态机。
-- 快捷键：Ctrl+T/W、Ctrl+Tab、Ctrl+Shift+C/V、Ctrl+Shift+F。
+- 快捷键：Ctrl+T/W、Ctrl+Tab、Ctrl+Shift+C/V、Ctrl+F。
 
 验收：
 - 集成测试：shell 输出、`stty size`、resize 生效、断线重连、host key 不匹配被拒绝。
@@ -734,7 +734,7 @@ mac:
   避免重启时自动向所有主机发起连接。
 - **复制粘贴**：沿用 VS Code 终端的交互。Windows/Linux 下有选区时 Ctrl+C 复制
   并清除选区，无选区时发送 SIGINT；macOS 上 Cmd+C / Cmd+V 负责剪贴板，Ctrl+C
-  始终留给 readline。右键有选区直接复制、无选区打开菜单（Shift+右键强制打开），
+  始终留给 readline。右键直接粘贴，Shift+右键打开菜单，
   菜单中无选区时「复制」为禁用状态并显示快捷键提示。所有粘贴入口统一经过 store：
   剪贴板为空或无终端时给出简短提示；多行文本在未启用 bracketed paste 时先显示
   行数与预览对话框（默认焦点在「取消」），确认后才写入终端；支持的程序的括号
@@ -888,8 +888,8 @@ mac:
   之前执行主题引导脚本；默认启动为浅色且 `ui-prefs.json` 写入 `light`；切换主题后
   DOM、localStorage 与 `ui-prefs.json` 均为 `dark`；清空 localStorage 后重启，仍由
   主进程传入的主题在首帧恢复深色（`data-theme-source` 为 `preload`）。
-  终端剪贴板专项检查由 `npm run e2e:clipboard` 固化：无选区右键打开菜单且
-  「复制」禁用；全选后右键直接复制（菜单不出现）并清除选区；Ctrl+C 把选区写入
+  终端剪贴板专项检查由 `npm run e2e:clipboard` 固化：Shift+右键打开菜单且
+  无选区时「复制」禁用；右键直接粘贴剪贴板内容（菜单不出现）；Ctrl+C 把选区写入
   剪贴板且不发送 `0x03`，随后无选区 Ctrl+C 发送 `0x03`；多行粘贴弹出对话框、
   确认前服务器收不到任何内容，确认后才写入；单行 Ctrl+Shift+V 直接粘贴且不弹窗。
   断线专项检查用 SIGSTOP 冻结 mock sshd 模拟设备失联：

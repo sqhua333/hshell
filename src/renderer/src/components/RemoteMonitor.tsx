@@ -1,10 +1,9 @@
-import { useEffect, useRef, useState, type ReactElement } from 'react'
-import { isNonSshSession, sessionTarget } from '@shared/session'
+import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react'
+import { isNonSshSession } from '@shared/session'
 import type { RemoteMonitorSample } from '@shared/types'
-import { api, isElectron } from '../api'
+import { api } from '../api'
 import { tr } from '../lib/i18n'
 import { sessionForRuntime, useApp } from '../store'
-import { Icon } from './Icon'
 
 /**
  * MobaXterm-style remote monitoring strip. Samples `/proc` and `df` on the
@@ -12,8 +11,17 @@ import { Icon } from './Icon'
  * simulated numbers instead (see `mock.ts`).
  */
 
+// A short history keeps the inline sparklines readable without eating width.
+const HISTORY = 20
 const POLL_MS = 2000
 const MAX_FAILURES = 3
+
+const COLORS = {
+  cpu: '#22c55e',
+  memory: '#3b82f6',
+  netDown: '#06b6d4',
+  netUp: '#f59e0b'
+}
 
 function pad(value: number): string {
   return String(value).padStart(2, '0')
@@ -52,33 +60,123 @@ function percent(used: number, total: number): number {
   return total > 0 ? Math.min(100, Math.max(0, (used / total) * 100)) : 0
 }
 
+function padHistory<T>(items: T[]): (T | null)[] {
+  const missing = HISTORY - items.length
+  if (missing <= 0) return items.slice(-HISTORY)
+  return [...Array<null>(missing).fill(null), ...items]
+}
+
+function MiniChart({
+  values,
+  color
+}: {
+  values: (number | null)[]
+  color: string
+}): ReactElement {
+  return (
+    <span className="monitor-chart" aria-hidden="true">
+      {values.map((value, index) => (
+        <span
+          key={index}
+          className="monitor-bar"
+          style={
+            value === null
+              ? undefined
+              : {
+                  height: `${Math.max(8, Math.min(100, value))}%`,
+                  background: color,
+                  opacity: 0.35 + (index / Math.max(1, values.length - 1)) * 0.65
+                }
+          }
+        />
+      ))}
+    </span>
+  )
+}
+
+function NetworkChart({
+  samples
+}: {
+  samples: (RemoteMonitorSample | null)[]
+}): ReactElement {
+  const present = samples.filter((sample): sample is RemoteMonitorSample => sample !== null)
+  // Scale each direction on its own so a mostly-download link still uses the
+  // whole chart; the colours, not the heights, separate the two directions.
+  const downPeak = Math.max(64 * 1024, ...present.map((sample) => sample.netDown))
+  const upPeak = Math.max(32 * 1024, ...present.map((sample) => sample.netUp))
+  return (
+    <span className="monitor-chart net" aria-hidden="true">
+      {samples.map((sample, index) => {
+        const opacity = 0.35 + (index / Math.max(1, samples.length - 1)) * 0.65
+        return (
+          <span className="monitor-net-col" key={index}>
+            <span className="monitor-net-half">
+              {sample ? (
+                <i
+                  style={{
+                    height: `${(sample.netDown / downPeak) * 100}%`,
+                    background: COLORS.netDown,
+                    opacity
+                  }}
+                />
+              ) : null}
+            </span>
+            <span className="monitor-net-half bottom">
+              {sample ? (
+                <i
+                  style={{
+                    height: `${(sample.netUp / upPeak) * 100}%`,
+                    background: COLORS.netUp,
+                    opacity
+                  }}
+                />
+              ) : null}
+            </span>
+          </span>
+        )
+      })}
+    </span>
+  )
+}
+
+function DiskBar({ percentUsed }: { percentUsed: number }): ReactElement {
+  return (
+    <span className="monitor-chart disk" aria-hidden="true">
+      <span className="monitor-disk-track">
+        <i style={{ width: `${percentUsed}%` }} />
+      </span>
+    </span>
+  )
+}
+
 function Metric({
   label,
   value,
-  detail
+  detail,
+  chart
 }: {
   label: string
   value: string
   detail: string
+  chart?: ReactNode
 }): ReactElement {
   return (
     <div className="monitor-metric" title={`${label} ${value} ${detail}`.trim()}>
       <span className="monitor-label">{label}</span>
       <span className="monitor-value">{value}</span>
+      {chart}
       <span className="monitor-sub">{detail}</span>
     </div>
   )
 }
 
-export function RemoteMonitor(): ReactElement {
+export function RemoteMonitor(): ReactElement | null {
   const runtimeId = useApp((state) => state.activeRuntimeId)
   const session = useApp((state) => sessionForRuntime(state.activeRuntimeId, state))
   const status = useApp((state) =>
     state.activeRuntimeId ? state.statuses[state.activeRuntimeId]?.status : undefined
   )
-  const toggleMonitor = useApp((state) => state.toggleMonitor)
-
-  const [current, setCurrent] = useState<RemoteMonitorSample | null>(null)
+  const [samples, setSamples] = useState<RemoteMonitorSample[]>([])
   const [error, setError] = useState<string | null>(null)
   const [retryNonce, setRetryNonce] = useState(0)
   const failures = useRef(0)
@@ -87,7 +185,7 @@ export function RemoteMonitor(): ReactElement {
   const eligible = Boolean(runtimeId && ssh && status === 'connected')
 
   useEffect(() => {
-    setCurrent(null)
+    setSamples([])
     setError(null)
     failures.current = 0
     if (!runtimeId || !eligible) return
@@ -100,7 +198,7 @@ export function RemoteMonitor(): ReactElement {
         if (cancelled) return
         failures.current = 0
         setError(null)
-        setCurrent(sample)
+        setSamples((previous) => [...previous, sample].slice(-HISTORY))
       } catch (failure) {
         if (cancelled) return
         failures.current += 1
@@ -119,12 +217,20 @@ export function RemoteMonitor(): ReactElement {
     }
   }, [runtimeId, eligible, retryNonce])
 
+  const current = samples[samples.length - 1]
+  const cpuHistory = padHistory(samples.map((sample) => sample.cpu))
+  const memoryHistory = padHistory(
+    samples.map((sample) => percent(sample.memUsed, sample.memTotal))
+  )
+  const netHistory = padHistory(samples)
   const memPercent = current ? percent(current.memUsed, current.memTotal) : 0
   const diskPercent = current ? percent(current.diskUsed, current.diskTotal) : 0
 
+  // Local, serial, Telnet and FTP tabs have no remote `/proc` to sample; the
+  // whole strip disappears with them instead of showing a "not supported" row.
+  if (!ssh) return null
+
   const emptyMessage = (() => {
-    if (!session) return tr('无活动会话', 'No active session')
-    if (!ssh) return tr('远程监控仅支持 SSH 会话', 'Remote monitoring requires an SSH session')
     if (status !== 'connected') return tr('等待会话连接…', 'Waiting for the session to connect…')
     if (error) return error
     return tr('正在读取远程监控…', 'Reading remote metrics…')
@@ -132,36 +238,6 @@ export function RemoteMonitor(): ReactElement {
 
   return (
     <div className="monitor">
-      <div className="monitor-head">
-        <Icon name="trigger" size={13} />
-        <span className="monitor-title">{tr('远程监控', 'Remote monitoring')}</span>
-        <span className="monitor-target">
-          {session ? sessionTarget(session) : tr('无活动会话', 'No active session')}
-        </span>
-        {!isElectron ? (
-          <span
-            className="monitor-demo"
-            title={tr('界面预览：数值为模拟数据', 'UI preview: values are simulated')}
-          >
-            {tr('演示数据', 'Demo data')}
-          </span>
-        ) : null}
-        {error && current ? (
-          <span className="monitor-error-badge" title={error}>
-            {tr('采集失败', 'Sampling failed')}
-          </span>
-        ) : null}
-        <span className="monitor-spacer" />
-        <span className="monitor-tick">{tr('每 2 秒采样', 'Every 2 s')}</span>
-        <button
-          className="icon-btn mini"
-          title={tr('隐藏远程监控 (Ctrl+Shift+U)', 'Hide remote monitoring (Ctrl+Shift+U)')}
-          onClick={toggleMonitor}
-        >
-          <Icon name="x" size={12} />
-        </button>
-      </div>
-
       <div className="monitor-body">
         {current ? (
           <>
@@ -172,16 +248,19 @@ export function RemoteMonitor(): ReactElement {
                 `${current.cores} 核 · 负载 ${current.load.toFixed(2)}`,
                 `${current.cores} cores · load ${current.load.toFixed(2)}`
               )}
+              chart={<MiniChart values={cpuHistory} color={COLORS.cpu} />}
             />
             <Metric
               label={tr('内存', 'MEM')}
               value={`${Math.round(memPercent)}%`}
               detail={`${formatSize(current.memUsed)} / ${formatSize(current.memTotal)}`}
+              chart={<MiniChart values={memoryHistory} color={COLORS.memory} />}
             />
             <Metric
               label={tr('网络', 'NET')}
               value={`↓ ${formatRate(current.netDown)}`}
               detail={`↑ ${formatRate(current.netUp)}`}
+              chart={<NetworkChart samples={netHistory} />}
             />
             <Metric
               label={tr('磁盘', 'DISK')}
@@ -190,6 +269,7 @@ export function RemoteMonitor(): ReactElement {
                 `${formatSize(current.diskUsed)} / ${formatSize(current.diskTotal)} 已用`,
                 `${formatSize(current.diskUsed)} / ${formatSize(current.diskTotal)} used`
               )}
+              chart={<DiskBar percentUsed={diskPercent} />}
             />
             <Metric
               label={tr('运行时间', 'UPTIME')}

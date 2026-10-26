@@ -415,7 +415,7 @@ export const useApp = create<AppState>((set, get) => ({
   folderParentId: null,
   keysOpen: false,
   tunnelsOpen: false,
-  appVersion: '0.2.1',
+  appVersion: '0.2.2',
   defaultUsername: 'root',
   locale: getLocale(),
 

@@ -1,6 +1,6 @@
 {
   "name": "hshell",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "HShell - a cross-platform SSH and serial client",
   "homepage": "https://example.com/hshell",
   "desktopName": "com.hshell.app.desktop",

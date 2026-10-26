@@ -614,11 +614,10 @@ export function TerminalPane({
       }}
       onContextMenu={(event) => {
         event.preventDefault()
-        const term = terminalRef.current
-        // VS Code-style right click: copy the selection, or open the menu when
-        // there is none. Shift always opens the menu so paste stays reachable.
-        if (!event.shiftKey && term?.hasSelection()) {
-          void useApp.getState().copySelection(runtimeId)
+        // Right click pastes, like most terminal emulators. Shift+right click
+        // still opens the actions menu (copy, select all, find, clear).
+        if (!event.shiftKey) {
+          void useApp.getState().pasteClipboard(runtimeId)
           return
         }
         setMenu({ x: event.clientX, y: event.clientY })
