@@ -1,8 +1,15 @@
-import { useEffect, useState, type ReactElement } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type ReactElement
+} from 'react'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 import type { FileEntry } from '@shared/types'
 import { isNonSshSession } from '@shared/session'
 import { api } from '../api'
+import { updateFileSelection } from '../lib/file-selection'
 import { formatBytes, formatSpeed } from '../lib/format'
 import { tr } from '../lib/i18n'
 import { sessionForRuntime, useApp } from '../store'
@@ -54,8 +61,8 @@ function formatDate(mtime: number): string {
 
 interface FileTableProps {
   entries: FileEntry[]
-  selected: FileEntry | null
-  onSelect: (entry: FileEntry) => void
+  selected: ReadonlySet<string>
+  onSelect: (entry: FileEntry, event: ReactMouseEvent<HTMLDivElement>) => void
   onOpen: (entry: FileEntry) => void
 }
 
@@ -72,8 +79,8 @@ function FileTable({ entries, selected, onSelect, onOpen }: FileTableProps): Rea
         {entries.map((entry) => (
           <div
             key={entry.path}
-            className={`file-row ${selected?.path === entry.path ? 'selected' : ''}`}
-            onClick={() => onSelect(entry)}
+            className={`file-row ${selected.has(entry.path) ? 'selected' : ''}`}
+            onClick={(event) => onSelect(entry, event)}
             onDoubleClick={() => onOpen(entry)}
             title={entry.path}
           >
@@ -189,7 +196,9 @@ export function FileTransferPanel({
   const [localPath, setLocalPath] = useState('')
   const [localDraft, setLocalDraft] = useState('')
   const [localEntries, setLocalEntries] = useState<FileEntry[]>([])
-  const [localSelected, setLocalSelected] = useState<FileEntry | null>(null)
+  const [localSelected, setLocalSelected] = useState<FileEntry[]>([])
+  // Path a Shift+click ranges from; reset whenever the listing changes.
+  const [localAnchor, setLocalAnchor] = useState<string | null>(null)
   const [localLoading, setLocalLoading] = useState(false)
   // True while the local pane lists drive roots ("This PC") instead of a directory.
   const [localDrives, setLocalDrives] = useState(false)
@@ -199,7 +208,8 @@ export function FileTransferPanel({
   const [remotePath, setRemotePath] = useState('')
   const [remoteDraft, setRemoteDraft] = useState('')
   const [remoteEntries, setRemoteEntries] = useState<FileEntry[]>([])
-  const [remoteSelected, setRemoteSelected] = useState<FileEntry | null>(null)
+  const [remoteSelected, setRemoteSelected] = useState<FileEntry[]>([])
+  const [remoteAnchor, setRemoteAnchor] = useState<string | null>(null)
   const [remoteLoading, setRemoteLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [activeTransfer, setActiveTransfer] = useState<string | null>(null)
@@ -225,7 +235,8 @@ export function FileTransferPanel({
       setLocalEntries(entries)
       setLocalPath(path)
       setLocalDraft(path)
-      setLocalSelected(null)
+      setLocalSelected([])
+      setLocalAnchor(null)
       setLocalDrives(false)
     } catch (error) {
       addToast('error', `${tr('本地目录读取失败：', 'Failed to read local directory: ')}${(error as Error).message}`)
@@ -240,7 +251,8 @@ export function FileTransferPanel({
     try {
       const entries = await api.fs.drives()
       setLocalEntries(entries)
-      setLocalSelected(null)
+      setLocalSelected([])
+      setLocalAnchor(null)
       setLocalDrives(true)
       setLocalDraft(thisPcLabel)
     } catch (error) {
@@ -265,7 +277,8 @@ export function FileTransferPanel({
       setRemoteEntries(entries)
       setRemotePath(path)
       setRemoteDraft(path)
-      setRemoteSelected(null)
+      setRemoteSelected([])
+      setRemoteAnchor(null)
     } catch (error) {
       addToast('error', `${tr('远程目录读取失败：', 'Failed to read remote directory: ')}${(error as Error).message}`)
       setRemoteDraft(remotePath)
@@ -293,7 +306,8 @@ export function FileTransferPanel({
       setRemoteEntries([])
       setRemotePath('')
       setRemoteDraft('')
-      setRemoteSelected(null)
+      setRemoteSelected([])
+      setRemoteAnchor(null)
       return
     }
     let cancelled = false
@@ -329,16 +343,48 @@ export function FileTransferPanel({
     return activeRuntimeId
   }
 
-  const uploadEntry = async (entry: FileEntry): Promise<void> => {
-    if (localDrives) return
+  const localSelectedPaths = useMemo(
+    () => new Set(localSelected.map((entry) => entry.path)),
+    [localSelected]
+  )
+  const remoteSelectedPaths = useMemo(
+    () => new Set(remoteSelected.map((entry) => entry.path)),
+    [remoteSelected]
+  )
+
+  const selectLocal = (entry: FileEntry, event: ReactMouseEvent<HTMLDivElement>): void => {
+    const next = updateFileSelection(localEntries, localSelected, localAnchor, entry, {
+      toggle: event.ctrlKey || event.metaKey,
+      range: event.shiftKey
+    })
+    setLocalSelected(next.selected)
+    setLocalAnchor(next.anchor)
+  }
+
+  const selectRemote = (entry: FileEntry, event: ReactMouseEvent<HTMLDivElement>): void => {
+    const next = updateFileSelection(remoteEntries, remoteSelected, remoteAnchor, entry, {
+      toggle: event.ctrlKey || event.metaKey,
+      range: event.shiftKey
+    })
+    setRemoteSelected(next.selected)
+    setRemoteAnchor(next.anchor)
+  }
+
+  const uploadEntries = async (entries: FileEntry[]): Promise<void> => {
+    if (localDrives || entries.length === 0) return
     const runtimeId = requireRemote()
     if (!runtimeId) return
     const transferId = newTransferId()
     setBusy(true)
     setActiveTransfer(transferId)
-    addToast('info', `${tr('正在上传', 'Uploading')} ${entry.name}…`)
+    addToast(
+      'info',
+      entries.length === 1
+        ? `${tr('正在上传', 'Uploading')} ${entries[0].name}…`
+        : `${tr('正在上传', 'Uploading')} ${entries.length} ${tr('项…', 'items…')}`
+    )
     try {
-      await remote.upload(runtimeId, [entry.path], remotePath, transferId)
+      await remote.upload(runtimeId, entries.map((entry) => entry.path), remotePath, transferId)
       await loadRemote(remotePath)
     } catch (error) {
       const message = (error as Error).message
@@ -351,23 +397,29 @@ export function FileTransferPanel({
   }
 
   const uploadSelected = async (): Promise<void> => {
-    if (localSelected) await uploadEntry(localSelected)
+    await uploadEntries(localSelected)
   }
 
-  const downloadEntry = async (entry: FileEntry): Promise<void> => {
+  const downloadEntries = async (entries: FileEntry[]): Promise<void> => {
     // In the This PC view there is no concrete local destination directory.
     if (localDrives) {
       addToast('warn', tr('请先选择本地目录再下载', 'Choose a local directory before downloading'))
       return
     }
+    if (entries.length === 0) return
     const runtimeId = requireRemote()
     if (!runtimeId) return
     const transferId = newTransferId()
     setBusy(true)
     setActiveTransfer(transferId)
-    addToast('info', `${tr('正在下载', 'Downloading')} ${entry.name}…`)
+    addToast(
+      'info',
+      entries.length === 1
+        ? `${tr('正在下载', 'Downloading')} ${entries[0].name}…`
+        : `${tr('正在下载', 'Downloading')} ${entries.length} ${tr('项…', 'items…')}`
+    )
     try {
-      await remote.download(runtimeId, [entry.path], localPath, transferId)
+      await remote.download(runtimeId, entries.map((entry) => entry.path), localPath, transferId)
       await loadLocal(localPath)
     } catch (error) {
       const message = (error as Error).message
@@ -384,7 +436,7 @@ export function FileTransferPanel({
   }
 
   const downloadSelected = async (): Promise<void> => {
-    if (remoteSelected) await downloadEntry(remoteSelected)
+    await downloadEntries(remoteSelected)
   }
 
   const localMkdir = (): void => {
@@ -403,14 +455,15 @@ export function FileTransferPanel({
   }
 
   const localRename = (): void => {
-    if (localDrives || !localSelected) return
+    if (localDrives || localSelected.length !== 1) return
+    const target = localSelected[0]
     setNameDialog({
       title: tr('重命名', 'Rename'),
-      initial: localSelected.name,
+      initial: target.name,
       onSubmit: (value) => {
         setNameDialog(null)
         void api.fs
-          .rename(localSelected.path, joinPath(localPath, value))
+          .rename(target.path, joinPath(localPath, value))
           .then(() => loadLocal(localPath))
           .catch((error: Error) => addToast('error', error.message))
       }
@@ -418,12 +471,24 @@ export function FileTransferPanel({
   }
 
   const localRemove = (): void => {
-    if (localDrives || !localSelected) return
-    if (!window.confirm(`${tr('确定删除本地「', 'Delete local ')}"${localSelected.name}"${tr('」吗？', '?')}`)) return
-    void api.fs
-      .remove(localSelected.path, localSelected.type === 'directory')
-      .then(() => loadLocal(localPath))
-      .catch((error: Error) => addToast('error', error.message))
+    if (localDrives || localSelected.length === 0) return
+    const confirmation =
+      localSelected.length === 1
+        ? `${tr('确定删除本地「', 'Delete local ')}"${localSelected[0].name}"${tr('」吗？', '?')}`
+        : `${tr('确定删除本地选中的 ', 'Delete ')}${localSelected.length}${tr(' 项吗？', ' selected items?')}`
+    if (!window.confirm(confirmation)) return
+    const targets = [...localSelected]
+    void (async () => {
+      for (const entry of targets) {
+        try {
+          await api.fs.remove(entry.path, entry.type === 'directory')
+        } catch (error) {
+          addToast('error', (error as Error).message)
+          break
+        }
+      }
+      await loadLocal(localPath)
+    })()
   }
 
   const remoteMkdir = (): void => {
@@ -444,14 +509,15 @@ export function FileTransferPanel({
 
   const remoteRename = (): void => {
     const runtimeId = requireRemote()
-    if (!runtimeId || !remoteSelected) return
+    if (!runtimeId || remoteSelected.length !== 1) return
+    const target = remoteSelected[0]
     setNameDialog({
       title: tr('重命名', 'Rename'),
-      initial: remoteSelected.name,
+      initial: target.name,
       onSubmit: (value) => {
         setNameDialog(null)
         void remote
-          .rename(runtimeId, remoteSelected.path, joinPath(remotePath, value))
+          .rename(runtimeId, target.path, joinPath(remotePath, value))
           .then(() => loadRemote(remotePath))
           .catch((error: Error) => addToast('error', error.message))
       }
@@ -460,21 +526,34 @@ export function FileTransferPanel({
 
   const remoteRemove = (): void => {
     const runtimeId = requireRemote()
-    if (!runtimeId || !remoteSelected) return
-    if (!window.confirm(`${tr('确定删除远程「', 'Delete remote ')}"${remoteSelected.name}"${tr('」吗？', '?')}`)) return
-    void remote
-      .remove(runtimeId, remoteSelected.path, remoteSelected.type === 'directory')
-      .then(() => loadRemote(remotePath))
-      .catch((error: Error) => addToast('error', error.message))
+    if (!runtimeId || remoteSelected.length === 0) return
+    const confirmation =
+      remoteSelected.length === 1
+        ? `${tr('确定删除远程「', 'Delete remote ')}"${remoteSelected[0].name}"${tr('」吗？', '?')}`
+        : `${tr('确定删除远程选中的 ', 'Delete ')}${remoteSelected.length}${tr(' 项吗？', ' selected items?')}`
+    if (!window.confirm(confirmation)) return
+    const targets = [...remoteSelected]
+    void (async () => {
+      for (const entry of targets) {
+        try {
+          await remote.remove(runtimeId, entry.path, entry.type === 'directory')
+        } catch (error) {
+          addToast('error', (error as Error).message)
+          break
+        }
+      }
+      await loadRemote(remotePath)
+    })()
   }
 
   const remoteChmod = (): void => {
     const runtimeId = requireRemote()
-    if (!runtimeId || !remoteSelected) return
-    const selectedPath = remoteSelected.path
+    if (!runtimeId || remoteSelected.length !== 1) return
+    const target = remoteSelected[0]
+    const selectedPath = target.path
     setNameDialog({
-      title: `${tr('修改权限：', 'Change permissions: ')}${remoteSelected.name}`,
-      initial: (remoteSelected.mode & 0o777).toString(8).padStart(3, '0'),
+      title: `${tr('修改权限：', 'Change permissions: ')}${target.name}`,
+      initial: (target.mode & 0o777).toString(8).padStart(3, '0'),
       onSubmit: (value) => {
         setNameDialog(null)
         const mode = parseInt(value.trim().replace(/^0o/i, ''), 8)
@@ -535,7 +614,7 @@ export function FileTransferPanel({
             className="icon-btn"
             title={tr('重命名', 'Rename')}
             onClick={localRename}
-            disabled={localDrives || !localSelected}
+            disabled={localDrives || localSelected.length !== 1}
           >
             <Icon name="edit" size={14} />
           </button>
@@ -543,7 +622,7 @@ export function FileTransferPanel({
             className="icon-btn"
             title={tr('删除', 'Delete')}
             onClick={localRemove}
-            disabled={localDrives || !localSelected}
+            disabled={localDrives || localSelected.length === 0}
           >
             <Icon name="trash" size={14} />
           </button>
@@ -552,7 +631,7 @@ export function FileTransferPanel({
             className="sftp-action"
             title={tr('上传选中项到远程当前目录', 'Upload selected item to the remote directory')}
             onClick={() => void uploadSelected()}
-            disabled={localDrives || !localSelected || !remoteReady || busy}
+            disabled={localDrives || localSelected.length === 0 || !remoteReady || busy}
           >
             <Icon name="upload" size={14} />
             {tr('上传', 'Upload')}
@@ -578,11 +657,11 @@ export function FileTransferPanel({
       </div>
       <FileTable
         entries={localEntries}
-        selected={localSelected}
-        onSelect={setLocalSelected}
+        selected={localSelectedPaths}
+        onSelect={selectLocal}
         onOpen={(entry) => {
           if (entry.type === 'directory') void loadLocal(entry.path)
-          else void uploadEntry(entry)
+          else void uploadEntries([entry])
         }}
       />
     </div>
@@ -624,7 +703,7 @@ export function FileTransferPanel({
             className="icon-btn"
             title={tr('重命名', 'Rename')}
             onClick={remoteRename}
-            disabled={!remoteReady || !remoteSelected}
+            disabled={!remoteReady || remoteSelected.length !== 1}
           >
             <Icon name="edit" size={14} />
           </button>
@@ -632,7 +711,11 @@ export function FileTransferPanel({
             className="icon-btn"
             title={tr('修改权限', 'Change permissions')}
             onClick={remoteChmod}
-            disabled={!remoteReady || !remoteSelected || remoteSelected.type === 'symlink'}
+            disabled={
+              !remoteReady ||
+              remoteSelected.length !== 1 ||
+              remoteSelected[0]?.type === 'symlink'
+            }
           >
             <Icon name="settings" size={14} />
           </button>
@@ -640,7 +723,7 @@ export function FileTransferPanel({
             className="icon-btn"
             title={tr('删除', 'Delete')}
             onClick={remoteRemove}
-            disabled={!remoteReady || !remoteSelected}
+            disabled={!remoteReady || remoteSelected.length === 0}
           >
             <Icon name="trash" size={14} />
           </button>
@@ -649,7 +732,7 @@ export function FileTransferPanel({
             className="sftp-action"
             title={tr('下载选中项到本地当前目录', 'Download selected item to the local directory')}
             onClick={() => void downloadSelected()}
-            disabled={localDrives || !remoteSelected || !remoteReady || busy}
+            disabled={localDrives || remoteSelected.length === 0 || !remoteReady || busy}
           >
             <Icon name="download" size={14} />
             {tr('下载', 'Download')}
@@ -688,11 +771,11 @@ export function FileTransferPanel({
       {remoteReady ? (
         <FileTable
           entries={remoteEntries}
-          selected={remoteSelected}
-          onSelect={setRemoteSelected}
+          selected={remoteSelectedPaths}
+          onSelect={selectRemote}
           onOpen={(entry) => {
             if (entry.type === 'directory') void loadRemote(entry.path)
-            else void downloadEntry(entry)
+            else void downloadEntries([entry])
           }}
         />
       ) : (
