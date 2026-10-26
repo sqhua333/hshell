@@ -39,6 +39,25 @@ describe('ZmodemController detection', () => {
     expect(Buffer.concat(terminal).toString()).toBe('hello world\r\n** not a header\r\n')
   })
 
+  it('flushes a trailing marker prefix when no header follows', async () => {
+    const terminal: Buffer[] = []
+    const controller = new ZmodemController({
+      writeRemote: () => undefined,
+      writeTerminal: (data) => terminal.push(Buffer.from(data)),
+      status: () => undefined,
+      host: {
+        pickDownloadDirectory: async () => null,
+        pickUploadFiles: async () => null
+      }
+    })
+    controller.feed(Buffer.from('prompt# '))
+    controller.feed(Buffer.from('*'))
+    expect(Buffer.concat(terminal).toString()).toBe('prompt# ')
+
+    await waitFor(() => Buffer.concat(terminal).toString() === 'prompt# *', 1000)
+    expect(Buffer.concat(terminal).toString()).toBe('prompt# *')
+  })
+
   it('detects a ZRINIT header split across chunks without leaking it', async () => {
     const terminal: Buffer[] = []
     const statuses: ZmodemStatus[] = []

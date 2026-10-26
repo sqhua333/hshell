@@ -14,6 +14,14 @@ const ZMODEM_MARKER = Buffer.from([0x2a, 0x2a, 0x18, 0x42, 0x30])
 /** Longest plausible init header before LF (CR LF + XON included). */
 const MAX_HEADER_BYTES = 32
 
+/**
+ * How long a trailing marker prefix (`*`, `**`, ...) may be withheld while
+ * waiting for the rest of a possibly split init header. Ordinary output that
+ * happens to end with `*` (an echo of a typed asterisk, a prompt) must not be
+ * stuck until the next chunk arrives, so release it once the burst ends.
+ */
+const HELD_FLUSH_MS = 30
+
 /** Stop reading a local file when the SSH channel has this much queued. */
 const SEND_HIGH_WATER = 4 * 1024 * 1024
 const CHUNK_SIZE = 64 * 1024
@@ -98,6 +106,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
  */
 export class ZmodemController {
   private held = Buffer.alloc(0)
+  private heldTimer: ReturnType<typeof setTimeout> | null = null
   private session: ZmodemSession | null = null
   private disposed = false
   /** Swallow the XON/XOFF that follows a dropped control header. */
@@ -111,6 +120,7 @@ export class ZmodemController {
       this.callbacks.writeTerminal(chunk)
       return
     }
+    this.clearHeldTimer()
     if (this.session) {
       this.consumeSession(this.session, chunk)
       return
@@ -124,6 +134,26 @@ export class ZmodemController {
     this.disposed = true
     this.session = null
     this.held = Buffer.alloc(0)
+    this.clearHeldTimer()
+  }
+
+  private clearHeldTimer(): void {
+    if (this.heldTimer) {
+      clearTimeout(this.heldTimer)
+      this.heldTimer = null
+    }
+  }
+
+  /** Release a held init-header prefix if no further data completes it. */
+  private scheduleHeldFlush(): void {
+    this.clearHeldTimer()
+    this.heldTimer = setTimeout(() => {
+      this.heldTimer = null
+      if (this.disposed || this.session || !this.held.length) return
+      const held = this.held
+      this.held = Buffer.alloc(0)
+      this.callbacks.writeTerminal(held)
+    }, HELD_FLUSH_MS)
   }
 
   private consumeSession(session: ZmodemSession, chunk: Buffer): void {
@@ -152,7 +182,10 @@ export class ZmodemController {
         const hold = trailingPrefixLength(data, pos)
         const end = data.length - hold
         if (end > pos) this.callbacks.writeTerminal(data.subarray(pos, end))
-        if (hold > 0) this.held = Buffer.from(data.subarray(end))
+        if (hold > 0) {
+          this.held = Buffer.from(data.subarray(end))
+          this.scheduleHeldFlush()
+        }
         return
       }
 
