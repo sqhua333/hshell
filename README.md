@@ -8,6 +8,8 @@
 ## 快速开始
 
 ```bash
+git clone git@github.com:sqhua333/hshell.git
+cd hshell
 npm install
 
 # 桌面端（需要图形会话）
@@ -446,8 +448,8 @@ Windows 的 Chromium 沙箱无法读取解压目录：该目录缺少 AppContain
 原因记录在 `%APPDATA%\hshell\startup.log`，渲染层错误记录在
 `%APPDATA%\hshell\renderer-errors.log`。
 
-发布前请把 `package.json` 中的 `homepage` 与维护者邮箱占位符（`example.com`）
-替换为真实信息。
+仓库地址：<https://github.com/sqhua333/hshell>。问题反馈与功能建议请提交到
+[Issues](https://github.com/sqhua333/hshell/issues)。
 
 ## 安全
 

@@ -2,10 +2,17 @@
   "name": "hshell",
   "version": "0.2.8",
   "description": "HShell - a cross-platform SSH and serial client",
-  "homepage": "https://example.com/hshell",
+  "homepage": "https://github.com/sqhua333/hshell#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sqhua333/hshell.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sqhua333/hshell/issues"
+  },
   "desktopName": "com.hshell.app.desktop",
   "main": "./out/main/index.js",
-  "author": "HShell <hshell@example.com>",
+  "author": "sqhua333 <sqhua333@126.com>",
   "license": "MIT",
   "scripts": {
     "dev": "electron-vite dev",
