@@ -63,6 +63,12 @@ const api: HshellApi = {
     saveScript: (content, defaultName) =>
       ipcRenderer.invoke('recording:saveScript', content, defaultName)
   },
+  ai: {
+    info: () => ipcRenderer.invoke('ai:info'),
+    watched: () => ipcRenderer.invoke('ai:watched'),
+    sessions: () => ipcRenderer.invoke('ai:sessions'),
+    setWatch: (runtimeId, watched) => ipcRenderer.invoke('ai:setWatch', runtimeId, watched)
+  },
   ssh: {
     connect: (req) => ipcRenderer.invoke('ssh:connect', req),
     disconnect: (runtimeId) => ipcRenderer.invoke('ssh:disconnect', runtimeId),

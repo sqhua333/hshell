@@ -2802,3 +2802,134 @@ body.resizing-sidebar {
 .tool-btn.recording {
   color: #dc2626;
 }
+
+/* ------------------------------------------------------------ AI access */
+
+.status-section.status-ai {
+  padding: 0 5px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.status-section.status-ai:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.status-section.status-ai.active {
+  color: var(--accent);
+}
+
+.ai-code-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ai-code {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.ai-command .ai-code {
+  max-height: 88px;
+}
+
+.ai-token {
+  font-size: 10.5px;
+}
+
+.ai-sessions {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.ai-sessions-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.ai-session-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.ai-session-row:last-child {
+  border-bottom: 0;
+}
+
+.ai-session-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: #94a3b8;
+}
+
+.ai-session-dot.connected {
+  background: #22c55e;
+}
+
+.ai-session-dot.connecting,
+.ai-session-dot.authenticating,
+.ai-session-dot.reconnecting {
+  background: #f59e0b;
+}
+
+.ai-session-dot.failed {
+  background: #ef4444;
+}
+
+.ai-session-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.ai-session-name {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-session-meta {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.ai-footer-hint {
+  max-width: 70%;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.ai-warning {
+  color: #b45309;
+}

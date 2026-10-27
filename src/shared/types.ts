@@ -424,6 +424,29 @@ export interface RecordingSaveResult {
   filePath?: string
 }
 
+/** Loopback MCP endpoint exposed for AI clients (read-only). */
+export interface AiMcpInfo {
+  /** e.g. `http://127.0.0.1:41337/mcp` */
+  url: string
+  /** Bearer token the client must send. */
+  token: string
+}
+
+/** A session the user marked as readable by AI clients. */
+export interface AiSessionSummary {
+  runtimeId: string
+  sessionId: string
+  name: string
+  target: string
+  connectionType: ConnectionType
+  status: SshStatus
+  startedAt: number
+  lastActivityAt: number
+  bufferedBytes: number
+  firstSeq: number
+  latestSeq: number
+}
+
 export interface SessionImportResult {
   canceled: boolean
   filePath?: string
@@ -514,6 +537,15 @@ export interface HshellApi {
   recording: {
     /** Show a save dialog and write the generated replay script (mode 0600). */
     saveScript(content: string, defaultName?: string): Promise<RecordingSaveResult>
+  }
+  ai: {
+    /** MCP endpoint details, or null when the server could not start. */
+    info(): Promise<AiMcpInfo | null>
+    /** Runtime ids the user marked as readable by AI clients. */
+    watched(): Promise<string[]>
+    /** Names and buffer ranges for watched sessions (dialog display). */
+    sessions(): Promise<AiSessionSummary[]>
+    setWatch(runtimeId: string, watched: boolean): Promise<void>
   }
   ssh: {
     connect(req: ConnectRequest): Promise<void>

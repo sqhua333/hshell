@@ -703,6 +703,12 @@ export function createMockApi(): HshellApi {
         return { canceled: false, filePath: name }
       }
     },
+    ai: {
+      info: async () => null,
+      watched: async () => [],
+      sessions: async () => [],
+      setWatch: async () => undefined
+    },
     layouts: {
       get: async () => mockLayout,
       save: async (layout: WindowLayout) => {

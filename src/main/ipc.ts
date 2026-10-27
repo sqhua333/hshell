@@ -24,6 +24,9 @@ import {
   windowLayoutSchema
 } from '@shared/schemas'
 import { createMenu } from './menu'
+import { startAiMcpServer, type AiMcpHandle } from './ai/mcp-server'
+import { SessionTap } from './ai/session-tap'
+import { logDiagnostic } from './diagnostics'
 import { AppStore } from './store'
 import { CredentialStore } from './storage/credential-store'
 import { LayoutStore } from './storage/layout-store'
@@ -180,9 +183,24 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   const knownHosts = new KnownHosts(userData)
   const vault = new Vault(userData, storageAdapter)
   const keys = new KeyService(userData, vault)
+  // Mirrors every session's traffic for the read-only AI tap. Only watched
+  // sessions are exposed over MCP; nothing here can write to a session.
+  const sessionTap = new SessionTap()
   const emit = (event: AppEvent): void => {
+    sessionTap.observeEvent(event)
     getWindow()?.webContents.send('hshell:event', event)
   }
+  let aiMcp: AiMcpHandle | null = null
+  void startAiMcpServer(sessionTap, userData, app.getVersion())
+    .then((handle) => {
+      aiMcp = handle
+      app.once('will-quit', () => {
+        void handle.close()
+      })
+    })
+    .catch((error: unknown) => {
+      logDiagnostic(`ai mcp server failed ${(error as Error).message}`)
+    })
   const zmodemHost = {
     async pickDownloadDirectory(suggestedName?: string): Promise<string | null> {
       const win = getWindow()
@@ -430,6 +448,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
 
   handle('ssh:connect', async (req: unknown) => {
     const parsed = connectRequestSchema.parse(req)
+    // FTP sessions are a file manager and expose no terminal traffic.
+    if (parsed.session.connectionType !== 'ftp') {
+      sessionTap.register(parsed.runtimeId, parsed.session)
+    }
     if (parsed.session.connectionType === 'serial') {
       await serial.connect(parsed)
       return
@@ -457,9 +479,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     else if (telnet.has(id)) telnet.disconnect(id)
     else if (ftp.has(id)) ftp.disconnect(id)
     else ssh.disconnect(id)
+    sessionTap.unregister(id)
   })
   handle('ssh:write', (runtimeId: string, data: string) => {
     const id = String(runtimeId)
+    sessionTap.recordInput(id, String(data))
     if (local.has(id)) local.write(id, String(data))
     else if (serial.has(id)) serial.write(id, String(data))
     else if (telnet.has(id)) telnet.write(id, String(data))
@@ -587,6 +611,13 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
 
   handle('layouts:get', () => layouts.get())
   handle('layouts:save', (input: unknown) => layouts.save(windowLayoutSchema.parse(input)))
+
+  handle('ai:info', () => aiMcp?.info ?? null)
+  handle('ai:watched', () => sessionTap.watchedIds())
+  handle('ai:sessions', () => sessionTap.list())
+  handle('ai:setWatch', (runtimeId: unknown, watched: unknown) => {
+    sessionTap.setWatched(String(runtimeId), Boolean(watched))
+  })
 
   handle('fs:home', () => os.homedir())
   handle('fs:startDir', () => localStartDir())

@@ -110,6 +110,7 @@ export function createMenu(locale: Language = 'zh'): void {
       submenu: [
         { label: en ? 'Port Forwarding…' : '端口转发…', click: () => send('tools:tunnels') },
         { label: en ? 'Key Manager…' : '密钥管理…', click: () => send('tools:keys') },
+        { label: en ? 'AI Access (MCP)…' : 'AI 访问（MCP）…', click: () => send('tools:ai') },
         { type: 'separator' },
         {
           label: en ? 'Compose Pane' : '撰写窗格',

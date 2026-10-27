@@ -7,6 +7,7 @@ import { isEditingField, matchShortcut } from './lib/shortcuts'
 import { publishRuntimeData } from './lib/runtime-bus'
 import { useApp } from './store'
 import { AboutDialog } from './components/AboutDialog'
+import { AiAccessDialog } from './components/AiAccessDialog'
 import { FolderDialog } from './components/FolderDialog'
 import { HostKeyDialog } from './components/HostKeyDialog'
 import { KeyboardDialog } from './components/KeyboardDialog'
@@ -233,6 +234,7 @@ export default function App(): ReactElement {
       <KeyboardDialog />
       <ShortcutsDialog />
       <AboutDialog />
+      <AiAccessDialog />
       <FolderDialog />
       <PasteConfirmDialog />
       <Toasts />

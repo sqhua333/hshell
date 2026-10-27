@@ -201,6 +201,8 @@ export async function runAction(action: ShortcutAction | string): Promise<void> 
         state.setShortcutsHelp(false)
       } else if (state.aboutOpen) {
         state.setAboutOpen(false)
+      } else if (state.aiDialogOpen) {
+        state.setAiDialogOpen(false)
       } else if (state.folderDialogOpen) {
         state.setFolderDialogOpen(false)
       } else if (state.sessionDialog.open) {
@@ -228,6 +230,10 @@ export async function runAction(action: ShortcutAction | string): Promise<void> 
 
     case 'tools:keys':
       state.setKeysOpen(true)
+      break
+
+    case 'tools:ai':
+      state.setAiDialogOpen(true)
       break
 
     case 'tools:compose':

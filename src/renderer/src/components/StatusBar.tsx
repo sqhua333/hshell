@@ -4,6 +4,7 @@ import { api, isElectron } from '../api'
 import { formatSpeed } from '../lib/format'
 import { tr } from '../lib/i18n'
 import { sessionForRuntime, useApp } from '../store'
+import { Icon } from './Icon'
 
 function statusText(status: string): string {
   switch (status) {
@@ -38,6 +39,12 @@ export function StatusBar(): ReactElement {
   const appVersion = useApp((state) => state.appVersion)
   const recordingStartedAt = useApp((state) => state.recordingStartedAt)
   const stopRecording = useApp((state) => state.stopRecording)
+  const activeRuntimeId = useApp((state) => state.activeRuntimeId)
+  const aiWatched = useApp((state) =>
+    state.activeRuntimeId ? state.aiWatched.includes(state.activeRuntimeId) : false
+  )
+  const setAiWatch = useApp((state) => state.setAiWatch)
+  const addToast = useApp((state) => state.addToast)
   const [clock, setClock] = useState(Date.now())
 
   useEffect(() => {
@@ -88,6 +95,24 @@ export function StatusBar(): ReactElement {
   const cancelSftp = (): void => {
     if (sftpTransfer?.phase === 'running') void api.sftp.cancel(sftpTransfer.transferId)
   }
+  // FTP sessions have no terminal traffic, so the main process never registers
+  // them with the AI tap.
+  const aiCapable = !!session && session.connectionType !== 'ftp' && current !== 'idle'
+  const toggleAiWatch = async (): Promise<void> => {
+    if (!activeRuntimeId) return
+    try {
+      await setAiWatch(activeRuntimeId, !aiWatched)
+      addToast(
+        'info',
+        !aiWatched
+          ? tr('AI 现在可以只读观察该会话', 'AI can now read this session')
+          : tr('已停止 AI 观察', 'Stopped AI watching'),
+        2500
+      )
+    } catch (err) {
+      addToast('error', (err as Error).message)
+    }
+  }
 
   return (
     <div className="statusbar">
@@ -102,6 +127,20 @@ export function StatusBar(): ReactElement {
         ) : null}
       </div>
       <div className="status-spacer" />
+      {aiCapable && activeRuntimeId ? (
+        <button
+          className={`status-section status-ai${aiWatched ? ' active' : ''}`}
+          title={
+            aiWatched
+              ? tr('停止向 AI 公开该会话', 'Stop exposing this session to AI')
+              : tr('允许 AI 只读观察该会话', 'Let AI read this session (read-only)')
+          }
+          onClick={() => void toggleAiWatch()}
+        >
+          <Icon name="eye" size={12} />
+          {tr('AI 观察', 'AI watch')}
+        </button>
+      ) : null}
       {recordingLabel ? (
         <div
           className="status-section status-recording clickable"

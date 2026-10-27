@@ -136,6 +136,12 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M14 11a5 5 0 0 0-7.1 0l-2 2a5 5 0 0 0 7.1 7.1l1.1-1.1" />
     </>
   ),
+  eye: (
+    <>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+      <circle cx="12" cy="12" r="3" />
+    </>
+  ),
   settings: (
     <>
       <circle cx="12" cy="12" r="3" />

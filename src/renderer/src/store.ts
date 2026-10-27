@@ -162,6 +162,10 @@ interface AppState {
   folderRenameId: string | null
   keysOpen: boolean
   tunnelsOpen: boolean
+  /** "AI access (MCP)" dialog with the loopback endpoint and token. */
+  aiDialogOpen: boolean
+  /** Runtime ids whose traffic the user exposes to AI clients (read-only). */
+  aiWatched: string[]
   appVersion: string
   defaultUsername: string
   locale: Locale
@@ -253,6 +257,8 @@ interface AppState {
   setAboutOpen(open: boolean): void
   setKeysOpen(open: boolean): void
   setTunnelsOpen(open: boolean): void
+  setAiDialogOpen(open: boolean): void
+  setAiWatch(runtimeId: string, watched: boolean): Promise<void>
   saveQuickCommands(list: QuickCommand[]): void
   setQuickCommandsOpen(open: boolean): void
 }
@@ -432,6 +438,8 @@ export const useApp = create<AppState>((set, get) => ({
   folderRenameId: null,
   keysOpen: false,
   tunnelsOpen: false,
+  aiDialogOpen: false,
+  aiWatched: [],
   appVersion: '0.2.3',
   defaultUsername: 'root',
   locale: getLocale(),
@@ -1227,6 +1235,19 @@ export const useApp = create<AppState>((set, get) => ({
 
   setTunnelsOpen(open) {
     set({ tunnelsOpen: open })
+  },
+
+  setAiDialogOpen(open) {
+    set({ aiDialogOpen: open })
+  },
+
+  async setAiWatch(runtimeId, watched) {
+    await api.ai.setWatch(runtimeId, watched)
+    set((state) => ({
+      aiWatched: watched
+        ? [...new Set([...state.aiWatched, runtimeId])]
+        : state.aiWatched.filter((id) => id !== runtimeId)
+    }))
   },
 
   saveQuickCommands(list) {
