@@ -187,7 +187,7 @@ export function FileTransferPanel({
     activeRuntimeId ? state.statuses[activeRuntimeId]?.status : undefined
   )
   const nonSshActive = useApp((state) =>
-    isNonSshSession(sessionForRuntime(state.activeRuntimeId, state))
+    isNonSshSession(sessionForRuntime(activeRuntimeId, state))
   )
   const addToast = useApp((state) => state.addToast)
   const remote = protocol === 'ftp' ? api.ftp : api.sftp
@@ -302,7 +302,10 @@ export function FileTransferPanel({
   }, [])
 
   useEffect(() => {
-    if (!activeRuntimeId || status !== 'connected' || nonSshActive) {
+    // An FTP session is `nonSsh`, but this panel *is* its file manager, so it
+    // must load a listing just like SFTP does. Keep the guard in sync with
+    // `remoteReady`, which already exempts FTP.
+    if (!remoteReady || !activeRuntimeId) {
       setRemoteEntries([])
       setRemotePath('')
       setRemoteDraft('')
