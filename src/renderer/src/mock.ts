@@ -708,6 +708,8 @@ export function createMockApi(): HshellApi {
       watched: async () => [],
       sessions: async () => [],
       setWatch: async () => undefined,
+      setWritable: async () => undefined,
+      decideInput: async () => undefined,
       bindAddresses: async () => [],
       setHost: async () => {
         throw new Error('AI access requires the desktop app')

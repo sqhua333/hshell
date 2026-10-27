@@ -15,6 +15,7 @@ import {
   type AiMcpHandle
 } from '../../src/main/ai/mcp-server'
 import { SessionTap } from '../../src/main/ai/session-tap'
+import type { SendInputHandler } from '../../src/main/ai/session-writer'
 
 function makeSession(): Session {
   return {
@@ -46,14 +47,16 @@ afterEach(async () => {
   userData = null
 })
 
-async function connect(tap: SessionTap, host?: string): Promise<Client> {
+async function connect(
+  tap: SessionTap,
+  host?: string,
+  sendInput?: SendInputHandler
+): Promise<Client> {
   userData = mkdtempSync(join(tmpdir(), 'hshell-mcp-'))
-  handle = await startAiMcpServer(
-    tap,
-    userData,
-    '0.0.0-test',
-    host === undefined ? {} : { host }
-  )
+  handle = await startAiMcpServer(tap, userData, '0.0.0-test', {
+    ...(host === undefined ? {} : { host }),
+    ...(sendInput ? { sendInput } : {})
+  })
   // 0.0.0.0 is a listen address, not a connectable one, so dial loopback.
   const endpoint = new URL(handle.info.url)
   if (handle.info.host === ANY_HOST) endpoint.hostname = LOOPBACK_HOST
@@ -187,6 +190,34 @@ describe('AI MCP server', () => {
     ])
     expect(payload.nextSeq).toBe(3)
 
+    await client.close()
+  })
+
+  it('exposes send_input only when a writer is supplied', async () => {
+    const tap = new SessionTap()
+    tap.register('rt-1', makeSession())
+    tap.setWatched('rt-1', true)
+    tap.setWritable('rt-1', true)
+    const calls: unknown[] = []
+    const client = await connect(tap, undefined, async (input) => {
+      calls.push(input)
+      return { status: 'sent' }
+    })
+
+    const tools = await client.listTools()
+    const send = tools.tools.find((tool) => tool.name === 'send_input')
+    expect(send).toBeDefined()
+    expect(send?.annotations?.readOnlyHint).toBe(false)
+    expect(send?.annotations?.destructiveHint).toBe(true)
+
+    const result = (await client.callTool({
+      name: 'send_input',
+      arguments: { runtimeId: 'rt-1', text: 'ls', reason: 'list files' }
+    })) as CallToolResult
+    expect(JSON.parse(textOf(result))).toEqual({ status: 'sent' })
+    expect(calls).toEqual([
+      { runtimeId: 'rt-1', text: 'ls', submit: undefined, reason: 'list files' }
+    ])
     await client.close()
   })
 

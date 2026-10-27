@@ -75,6 +75,47 @@ describe('SessionTap buffering', () => {
     expect(result.nextSeq).toBe(3)
   })
 
+  it('grants input only after watching and marks who typed it', () => {
+    const tap = new SessionTap()
+    tap.register('rt-1', makeSession())
+    expect(() => tap.setWritable('rt-1', true)).toThrow(/AI 观察/)
+
+    tap.setWatched('rt-1', true)
+    tap.setWritable('rt-1', true)
+    tap.observeEvent({ type: 'ssh:status', runtimeId: 'rt-1', status: 'connected' })
+    expect(tap.list()[0].writable).toBe(true)
+    expect(tap.requireInput('rt-1').name).toBe('ai-target')
+
+    tap.recordInput('rt-1', 'id\r', 'ai')
+    tap.recordInput('rt-1', 'echo hi\r', 'user')
+    const inputs = tap.read('rt-1').chunks.filter((chunk) => chunk.direction === 'in')
+    expect(inputs.map((chunk) => chunk.source)).toEqual(['ai', 'user'])
+  })
+
+  it('revokes input when watching stops', () => {
+    const tap = watchedTap()
+    tap.observeEvent({ type: 'ssh:status', runtimeId: 'rt-1', status: 'connected' })
+    tap.setWritable('rt-1', true)
+    tap.setWatched('rt-1', false)
+    expect(() => tap.requireInput('rt-1')).toThrow(/AI 观察/)
+
+    tap.setWatched('rt-1', true)
+    expect(tap.list()[0].writable).toBe(false)
+    expect(() => tap.requireInput('rt-1')).toThrow(/AI 输入/)
+  })
+
+  it('refuses input while the session is not connected', () => {
+    const tap = watchedTap()
+    tap.setWritable('rt-1', true)
+    expect(() => tap.requireInput('rt-1')).toThrow(/未连接/)
+
+    tap.observeEvent({ type: 'ssh:status', runtimeId: 'rt-1', status: 'connected' })
+    expect(() => tap.requireInput('rt-1')).not.toThrow()
+
+    tap.observeEvent({ type: 'ssh:status', runtimeId: 'rt-1', status: 'closed' })
+    expect(() => tap.requireInput('rt-1')).toThrow(/未连接/)
+  })
+
   it('returns the newest tail when no sequence is given', () => {
     const tap = watchedTap()
     tap.recordOutput('rt-1', Buffer.from('aaa'))

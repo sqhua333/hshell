@@ -8,6 +8,7 @@ import { publishRuntimeData } from './lib/runtime-bus'
 import { useApp } from './store'
 import { AboutDialog } from './components/AboutDialog'
 import { AiAccessDialog } from './components/AiAccessDialog'
+import { AiInputPrompt } from './components/AiInputPrompt'
 import { FolderDialog } from './components/FolderDialog'
 import { HostKeyDialog } from './components/HostKeyDialog'
 import { KeyboardDialog } from './components/KeyboardDialog'
@@ -139,6 +140,28 @@ export default function App(): ReactElement {
             state.addToast('error', event.message ?? tr('ZMODEM 传输失败', 'ZMODEM transfer failed'))
           }
           break
+        case 'ai:input-request':
+          state.setAiInputRequest(event.request)
+          break
+        case 'ai:input-result':
+          if (state.aiInputRequest?.id === event.id) state.setAiInputRequest(null)
+          if (event.status === 'sent') {
+            state.addToast(
+              'info',
+              tr(`AI 已向 ${event.name} 发送输入`, `AI input sent to ${event.name}`)
+            )
+          } else if (event.status === 'timeout') {
+            state.addToast(
+              'warn',
+              tr(
+                `AI 输入请求已超时（${event.name}）`,
+                `AI input request timed out (${event.name})`
+              )
+            )
+          } else if (event.status === 'blocked' && event.message) {
+            state.addToast('warn', event.message)
+          }
+          break
         case 'menu:action':
           void runAction(event.action)
           break
@@ -235,6 +258,7 @@ export default function App(): ReactElement {
       <ShortcutsDialog />
       <AboutDialog />
       <AiAccessDialog />
+      <AiInputPrompt />
       <FolderDialog />
       <PasteConfirmDialog />
       <Toasts />

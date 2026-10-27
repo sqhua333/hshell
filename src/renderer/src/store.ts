@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type {
+  AiInputRequest,
   Folder,
   HostKeyPrompt,
   KeyboardPrompt,
@@ -164,8 +165,10 @@ interface AppState {
   tunnelsOpen: boolean
   /** "AI access (MCP)" dialog with the loopback endpoint and token. */
   aiDialogOpen: boolean
-  /** Runtime ids whose traffic the user exposes to AI clients (read-only). */
+  /** Runtime ids whose traffic the user exposes to AI clients. */
   aiWatched: string[]
+  /** Pending AI input awaiting the user's approval, if any. */
+  aiInputRequest: AiInputRequest | null
   appVersion: string
   defaultUsername: string
   locale: Locale
@@ -259,6 +262,7 @@ interface AppState {
   setTunnelsOpen(open: boolean): void
   setAiDialogOpen(open: boolean): void
   setAiWatch(runtimeId: string, watched: boolean): Promise<void>
+  setAiInputRequest(request: AiInputRequest | null): void
   saveQuickCommands(list: QuickCommand[]): void
   setQuickCommandsOpen(open: boolean): void
 }
@@ -440,6 +444,7 @@ export const useApp = create<AppState>((set, get) => ({
   tunnelsOpen: false,
   aiDialogOpen: false,
   aiWatched: [],
+  aiInputRequest: null,
   appVersion: '0.2.3',
   defaultUsername: 'root',
   locale: getLocale(),
@@ -1248,6 +1253,11 @@ export const useApp = create<AppState>((set, get) => ({
         ? [...new Set([...state.aiWatched, runtimeId])]
         : state.aiWatched.filter((id) => id !== runtimeId)
     }))
+  },
+
+  // Approval is urgent: close the settings dialog so the card has focus.
+  setAiInputRequest(request) {
+    set(request ? { aiInputRequest: request, aiDialogOpen: false } : { aiInputRequest: request })
   },
 
   saveQuickCommands(list) {

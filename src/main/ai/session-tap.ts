@@ -16,6 +16,8 @@ export interface AiChunk {
   /** Epoch milliseconds when the chunk was observed. */
   at: number
   direction: AiDirection
+  /** Who typed it; only set on input chunks. */
+  source?: 'user' | 'ai'
   text: string
 }
 
@@ -75,6 +77,8 @@ interface Channel {
   lastActivityAt: number
   /** Only watched sessions are listed to AI clients and readable over MCP. */
   watched: boolean
+  /** The user also allowed AI input; never implied by watching alone. */
+  writable: boolean
   chunks: AiChunk[]
   bytes: number
   nextSeq: number
@@ -134,6 +138,7 @@ export class SessionTap {
       startedAt: now,
       lastActivityAt: now,
       watched: false,
+      writable: false,
       chunks: [],
       bytes: 0,
       nextSeq: 1,
@@ -172,17 +177,48 @@ export class SessionTap {
    * prompt (e.g. a sudo password). Authentication passwords sent through the
    * login/password prompts use their own IPC channels and are not captured.
    */
-  recordInput(runtimeId: string, data: string, now = Date.now()): void {
+  recordInput(
+    runtimeId: string,
+    data: string,
+    source: 'user' | 'ai' = 'user',
+    now = Date.now()
+  ): void {
     const channel = this.channels.get(runtimeId)
     if (!channel || !data) return
     const text = cleanTapText(data)
-    if (text) this.append(channel, 'in', text, now)
+    if (text) this.append(channel, 'in', text, now, source)
   }
 
   setWatched(runtimeId: string, watched: boolean): void {
     const channel = this.channels.get(runtimeId)
     if (!channel) throw new Error('会话未注册或已断开')
     channel.watched = watched
+    // Revoking visibility also revokes input; the two toggles are independent
+    // to grant, but turning watching off must never leave write access behind.
+    if (!watched) channel.writable = false
+  }
+
+  /** Input requires watching, so the AI can see the result of what it sent. */
+  setWritable(runtimeId: string, writable: boolean): void {
+    const channel = this.channels.get(runtimeId)
+    if (!channel) throw new Error('会话未注册或已断开')
+    if (writable && !channel.watched) throw new Error('请先开启 AI 观察')
+    channel.writable = writable
+  }
+
+  /**
+   * Summarise a session that may accept AI input. Throws with a user-facing
+   * message so the MCP tool can report why a write was refused.
+   */
+  requireInput(runtimeId: string): AiSessionSummary {
+    const channel = this.channels.get(runtimeId)
+    if (!channel) throw new Error('会话不存在或已断开')
+    if (!channel.watched) throw new Error('该会话未开启 AI 观察')
+    if (!channel.writable) throw new Error('该会话未允许 AI 输入')
+    // A registered runtime can outlive its stream (remote shell exited); a
+    // write would be silently dropped, so report it instead of "sent".
+    if (channel.status !== 'connected') throw new Error('会话未连接')
+    return this.summarize(channel)
   }
 
   watchedIds(): string[] {
@@ -195,20 +231,25 @@ export class SessionTap {
   list(): AiSessionSummary[] {
     return [...this.channels.values()]
       .filter((channel) => channel.watched)
-      .map((channel) => ({
-        runtimeId: channel.runtimeId,
-        sessionId: channel.sessionId,
-        name: channel.name,
-        target: channel.target,
-        connectionType: channel.connectionType,
-        status: channel.status,
-        startedAt: channel.startedAt,
-        lastActivityAt: channel.lastActivityAt,
-        bufferedBytes: channel.bytes,
-        firstSeq: channel.firstSeq,
-        latestSeq: Math.max(channel.firstSeq - 1, channel.nextSeq - 1)
-      }))
+      .map((channel) => this.summarize(channel))
       .sort((a, b) => b.lastActivityAt - a.lastActivityAt)
+  }
+
+  private summarize(channel: Channel): AiSessionSummary {
+    return {
+      runtimeId: channel.runtimeId,
+      sessionId: channel.sessionId,
+      name: channel.name,
+      target: channel.target,
+      connectionType: channel.connectionType,
+      status: channel.status,
+      startedAt: channel.startedAt,
+      lastActivityAt: channel.lastActivityAt,
+      bufferedBytes: channel.bytes,
+      firstSeq: channel.firstSeq,
+      latestSeq: Math.max(channel.firstSeq - 1, channel.nextSeq - 1),
+      writable: channel.watched && channel.writable
+    }
   }
 
   /**
@@ -296,12 +337,24 @@ export class SessionTap {
     }
   }
 
-  private append(channel: Channel, direction: AiDirection, text: string, at: number): void {
+  private append(
+    channel: Channel,
+    direction: AiDirection,
+    text: string,
+    at: number,
+    source?: 'user' | 'ai'
+  ): void {
     let body = text
     if (body.length > MAX_CHUNK_CHARS) {
       body = `…[truncated]\n${body.slice(-MAX_CHUNK_CHARS)}`
     }
-    const chunk: AiChunk = { seq: channel.nextSeq, at, direction, text: body }
+    const chunk: AiChunk = {
+      seq: channel.nextSeq,
+      at,
+      direction,
+      ...(source ? { source } : {}),
+      text: body
+    }
     channel.nextSeq += 1
     channel.chunks.push(chunk)
     channel.bytes += byteLength(body)

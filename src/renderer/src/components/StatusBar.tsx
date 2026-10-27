@@ -105,7 +105,7 @@ export function StatusBar(): ReactElement {
       addToast(
         'info',
         !aiWatched
-          ? tr('AI 现在可以只读观察该会话', 'AI can now read this session')
+          ? tr('AI 现在可以观察该会话', 'AI can now read this session')
           : tr('已停止 AI 观察', 'Stopped AI watching'),
         2500
       )

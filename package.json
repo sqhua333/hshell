@@ -26,6 +26,7 @@
     "e2e:drag-split": "node scripts/e2e-drag-split.mjs",
     "e2e:timestamps": "node scripts/e2e-terminal-stamps.mjs",
     "e2e:password": "node scripts/e2e-password-prompt.mjs",
+    "e2e:ai-input": "node scripts/e2e-ai-input.mjs",
     "e2e:clipboard": "node scripts/e2e-clipboard.mjs",
     "e2e:local": "node scripts/e2e-local-shell.mjs",
     "e2e:startup-theme": "node scripts/e2e-startup-theme.mjs",

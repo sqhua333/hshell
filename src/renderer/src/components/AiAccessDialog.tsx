@@ -117,6 +117,24 @@ function AiAccessDialogInner(): ReactElement {
     }
   }
 
+  const toggleWritable = async (item: AiSessionSummary): Promise<void> => {
+    try {
+      await api.ai.setWritable(item.runtimeId, !item.writable)
+      await loadSessions()
+      addToast(
+        'info',
+        item.writable
+          ? tr('已禁止 AI 向该会话输入', 'AI input disabled for this session')
+          : tr(
+              '已允许 AI 申请输入；每次写入仍需你确认',
+              'AI may now request input; each write still needs your approval'
+            )
+      )
+    } catch (err) {
+      setError((err as Error).message)
+    }
+  }
+
   const applyHost = async (): Promise<void> => {
     if (applying || (info && selectedHost === info.host)) return
     setApplying(true)
@@ -159,8 +177,11 @@ function AiAccessDialogInner(): ReactElement {
       title={tr('AI 访问（MCP）', 'AI access (MCP)')}
       subtitle={
         exposed
-          ? tr(`只读 · 监听 ${info?.host}`, `Read-only · listening on ${info?.host}`)
-          : tr('只读 · 仅本机回环地址', 'Read-only · loopback only')
+          ? tr(
+              `输入需审批 · 监听 ${info?.host}`,
+              `Input needs approval · listening on ${info?.host}`
+            )
+          : tr('输入需审批 · 仅本机回环地址', 'Input needs approval · loopback only')
       }
       onClose={() => setOpen(false)}
       width={680}
@@ -185,14 +206,14 @@ function AiAccessDialogInner(): ReactElement {
     >
       <p className="form-hint">
         {tr(
-          'HShell 在本机提供一个只读 MCP 服务。只有下方列出的会话对 AI 可见；AI 可以读取输出和输入历史，但不能向会话输入内容或执行命令。',
-          'HShell exposes a read-only MCP server on this machine. Only the sessions listed below are visible to AI clients; AI can read output and input history but cannot type into a session or run commands.'
+          'HShell 在本机提供一个 MCP 服务。只有下方列出的会话对 AI 可见；AI 可以读取输出和输入历史。对单独允许输入的会话，AI 每次写入都会弹出审批，确认后才发送。',
+          'HShell exposes an MCP server on this machine. Only the sessions listed below are visible; AI can read output and input history. For sessions you allow input on, every write opens an approval card and is sent only after you confirm.'
         )}
       </p>
       <p className="form-hint ai-warning">
         {tr(
-          '注意：输出和输入都会被缓存，包括在会话中键入的密码等敏感内容。只对信任的 AI 客户端开启观察。',
-          'Note: both output and input are buffered, including sensitive text such as a password typed at a prompt. Only enable watching for AI clients you trust.'
+          '注意：输出和输入都会被缓存，包括在会话中键入的密码等敏感内容；AI 写入的文本还会进入 ai-input.log。只对信任的 AI 客户端开启。',
+          'Note: output and input are buffered, including sensitive text such as a password typed at a prompt; text sent by AI is also written to ai-input.log. Only enable this for AI clients you trust.'
         )}
       </p>
 
@@ -328,21 +349,40 @@ function AiAccessDialogInner(): ReactElement {
                 <div key={item.runtimeId} className="ai-session-row">
                   <span className={`ai-session-dot ${item.status}`} />
                   <div className="ai-session-main">
-                    <div className="ai-session-name">{item.name}</div>
+                    <div className="ai-session-name">
+                      {item.name}
+                      {item.writable ? (
+                        <span className="ai-writable-badge">{tr('可输入', 'input')}</span>
+                      ) : null}
+                    </div>
                     <div className="ai-session-meta">
                       {item.target} · {statusLabel(item.status)} ·{' '}
                       {formatBytes(item.bufferedBytes)} · #{item.firstSeq}–{item.latestSeq}
                     </div>
                   </div>
-                  <button
-                    className="btn btn-small"
-                    onClick={() => void stopWatching(item.runtimeId)}
-                  >
-                    {tr('停止观察', 'Stop')}
-                  </button>
+                  <div className="ai-session-actions">
+                    <button
+                      className="btn btn-small"
+                      onClick={() => void toggleWritable(item)}
+                    >
+                      {item.writable ? tr('禁止输入', 'Block input') : tr('允许输入', 'Allow input')}
+                    </button>
+                    <button
+                      className="btn btn-small"
+                      onClick={() => void stopWatching(item.runtimeId)}
+                    >
+                      {tr('停止观察', 'Stop')}
+                    </button>
+                  </div>
                 </div>
               ))
             )}
+            <p className="form-hint">
+              {tr(
+                '「允许输入」后 AI 才能申请写入；每次写入都会在 HShell 弹出窗口，确认后才发送，拒绝或超时不会写入。',
+                '“Allow input” lets AI request writes. Every write opens an approval card in HShell and is only sent after you confirm; denying or ignoring it writes nothing.'
+              )}
+            </p>
           </div>
         </>
       ) : null}

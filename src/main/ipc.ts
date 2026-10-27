@@ -31,6 +31,7 @@ import {
   type AiMcpHandle
 } from './ai/mcp-server'
 import { SessionTap } from './ai/session-tap'
+import { createSessionWriter } from './ai/session-writer'
 import { logDiagnostic } from './diagnostics'
 import { AppStore } from './store'
 import { CredentialStore } from './storage/credential-store'
@@ -188,13 +189,21 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   const knownHosts = new KnownHosts(userData)
   const vault = new Vault(userData, storageAdapter)
   const keys = new KeyService(userData, vault)
-  // Mirrors every session's traffic for the read-only AI tap. Only watched
-  // sessions are exposed over MCP; nothing here can write to a session.
+  // Mirrors every session's traffic for the AI tap. Only watched sessions are
+  // exposed over MCP, and AI input needs a second per-session grant plus an
+  // explicit approval in the window for every write.
   const sessionTap = new SessionTap()
   const emit = (event: AppEvent): void => {
     sessionTap.observeEvent(event)
     getWindow()?.webContents.send('hshell:event', event)
   }
+  const aiWriter = createSessionWriter({
+    tap: sessionTap,
+    userData,
+    emit,
+    write: (runtimeId, data) => writeToSession(runtimeId, data),
+    windowAvailable: () => getWindow() !== null
+  })
   let aiMcp: AiMcpHandle | null = null
   // Serialize bind/rebind calls: the startup bind and a host change from the
   // dialog must not compete for the same port.
@@ -210,7 +219,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
         sessionTap,
         userData,
         app.getVersion(),
-        host === undefined ? {} : { host }
+        {
+          ...(host === undefined ? {} : { host }),
+          sendInput: (input) => aiWriter.request(input)
+        }
       )
       aiMcp = handle
       return handle
@@ -222,6 +234,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     logDiagnostic(`ai mcp server failed ${(error as Error).message}`)
   })
   app.once('will-quit', () => {
+    aiWriter.dispose()
     void aiMcp?.close()
   })
   const zmodemHost = {
@@ -495,6 +508,32 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     await ssh.connect({ ...parsed, session })
   })
   // All terminal backends share these channels; dispatch by ownership.
+  // Shared by human input and the AI approval path so both reach the same
+  // backend. Returns false when nothing owns the runtime any more.
+  function writeToSession(id: string, data: string): boolean {
+    if (local.has(id)) {
+      local.write(id, data)
+      return true
+    }
+    if (serial.has(id)) {
+      serial.write(id, data)
+      return true
+    }
+    if (telnet.has(id)) {
+      telnet.write(id, data)
+      return true
+    }
+    if (ftp.has(id)) {
+      ftp.write(id, data)
+      return true
+    }
+    if (ssh.has(id)) {
+      ssh.write(id, data)
+      return true
+    }
+    return false
+  }
+
   handle('ssh:disconnect', (runtimeId: string) => {
     const id = String(runtimeId)
     if (local.has(id)) local.disconnect(id)
@@ -503,15 +542,13 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     else if (ftp.has(id)) ftp.disconnect(id)
     else ssh.disconnect(id)
     sessionTap.unregister(id)
+    aiWriter.cancel(id)
   })
   handle('ssh:write', (runtimeId: string, data: string) => {
     const id = String(runtimeId)
-    sessionTap.recordInput(id, String(data))
-    if (local.has(id)) local.write(id, String(data))
-    else if (serial.has(id)) serial.write(id, String(data))
-    else if (telnet.has(id)) telnet.write(id, String(data))
-    else if (ftp.has(id)) ftp.write(id, String(data))
-    else ssh.write(id, String(data))
+    const text = String(data)
+    sessionTap.recordInput(id, text, 'user')
+    writeToSession(id, text)
   })
   handle('ssh:resize', (runtimeId: string, cols: number, rows: number) => {
     const id = String(runtimeId)
@@ -639,7 +676,17 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   handle('ai:watched', () => sessionTap.watchedIds())
   handle('ai:sessions', () => sessionTap.list())
   handle('ai:setWatch', (runtimeId: unknown, watched: unknown) => {
-    sessionTap.setWatched(String(runtimeId), Boolean(watched))
+    const id = String(runtimeId)
+    sessionTap.setWatched(id, Boolean(watched))
+    if (!watched) aiWriter.cancel(id, '已停止 AI 观察，输入请求取消')
+  })
+  handle('ai:setWritable', (runtimeId: unknown, writable: unknown) => {
+    const id = String(runtimeId)
+    sessionTap.setWritable(id, Boolean(writable))
+    if (!writable) aiWriter.cancel(id, 'AI 输入授权已撤销')
+  })
+  handle('ai:decideInput', (id: unknown, allow: unknown) => {
+    aiWriter.decide(String(id), Boolean(allow))
   })
   handle('ai:bindAddresses', () => listBindAddresses())
   handle('ai:setHost', async (value: unknown) => {

@@ -333,6 +333,15 @@ export type AppEvent =
   | ({ type: 'zmodem:status' } & ZmodemStatusEvent)
   | ({ type: 'sftp:progress' } & SftpProgressEvent)
   | ({ type: 'tunnel:status' } & TunnelInfo)
+  | { type: 'ai:input-request'; request: AiInputRequest }
+  | {
+      type: 'ai:input-result'
+      id: string
+      runtimeId: string
+      name: string
+      status: AiInputStatus
+      message?: string
+    }
   | { type: 'menu:action'; action: string }
 
 export interface ConnectRequest {
@@ -424,7 +433,7 @@ export interface RecordingSaveResult {
   filePath?: string
 }
 
-/** Loopback MCP endpoint exposed for AI clients (read-only). */
+/** MCP endpoint exposed for AI clients; input is off unless granted per session. */
 export interface AiMcpInfo {
   /** e.g. `http://127.0.0.1:41337/mcp` */
   url: string
@@ -454,6 +463,31 @@ export interface AiSessionSummary {
   bufferedBytes: number
   firstSeq: number
   latestSeq: number
+  /** The user also allowed AI input; every write still needs approval. */
+  writable: boolean
+}
+
+/** An AI client asked to type into a session; the user must approve it. */
+export interface AiInputRequest {
+  /** Correlates the prompt with the decision and the result event. */
+  id: string
+  runtimeId: string
+  name: string
+  target: string
+  text: string
+  /** When true the main process appends Enter after the text. */
+  submit: boolean
+  /** The AI's stated reason, shown on the approval card. */
+  reason?: string
+  /** Epoch milliseconds when the request is auto-denied. */
+  expiresAt: number
+}
+
+export type AiInputStatus = 'sent' | 'denied' | 'timeout' | 'blocked'
+
+export interface AiInputOutcome {
+  status: AiInputStatus
+  message?: string
 }
 
 export interface SessionImportResult {
@@ -555,6 +589,10 @@ export interface HshellApi {
     /** Names and buffer ranges for watched sessions (dialog display). */
     sessions(): Promise<AiSessionSummary[]>
     setWatch(runtimeId: string, watched: boolean): Promise<void>
+    /** Grant or revoke AI input; every write still needs approval. */
+    setWritable(runtimeId: string, writable: boolean): Promise<void>
+    /** Approve or reject a pending AI input request. */
+    decideInput(id: string, allow: boolean): Promise<void>
     /** Non-loopback IPv4 addresses HShell can bind the MCP server to. */
     bindAddresses(): Promise<AiBindAddress[]>
     /** Rebind the MCP server; `127.0.0.1` keeps it local. */

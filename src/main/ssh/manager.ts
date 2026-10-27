@@ -1000,6 +1000,10 @@ export class SshManager {
     return reading.sample
   }
 
+  has(runtimeId: string): boolean {
+    return this.runtimes.has(runtimeId)
+  }
+
   write(runtimeId: string, data: string): void {
     const rt = this.runtimes.get(runtimeId)
     if (!rt?.stream) return

@@ -9,6 +9,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 import type { AiBindAddress, AiMcpInfo } from '@shared/types'
 import type { AiWaitOptions, SessionTap } from './session-tap'
+import type { SendInputHandler } from './session-writer'
 
 export type { AiMcpInfo }
 
@@ -38,10 +39,15 @@ function toolFailure(error: unknown): CallToolResult {
 }
 
 /**
- * Read-only MCP surface over the session tap. Only sessions the user marked as
- * watched are listed or readable; there is deliberately no write tool.
+ * MCP surface over the session tap. Only sessions the user marked as watched
+ * are listed or readable. When a writer is supplied, `send_input` is exposed
+ * too, but every call still has to be approved inside HShell.
  */
-function buildServer(tap: SessionTap, version: string): McpServer {
+function buildServer(
+  tap: SessionTap,
+  version: string,
+  sendInput?: SendInputHandler
+): McpServer {
   const server = new McpServer({ name: 'hshell', version })
 
   server.registerTool(
@@ -146,6 +152,47 @@ function buildServer(tap: SessionTap, version: string): McpServer {
       }
     }
   )
+
+  if (sendInput) {
+    server.registerTool(
+      'send_input',
+      {
+        title: 'Type into a session (requires human approval)',
+        description:
+          'Send terminal input to a session the user allowed AI input for. HShell shows ' +
+          'the exact text and your reason to the user, and only writes after they approve; ' +
+          'the call blocks until then. Returns { status: "sent" | "denied" | "timeout" | ' +
+          '"blocked", message? }. With submit=true (default) Enter is appended. Control ' +
+          'characters other than tab/newline are rejected. Only printable text is allowed; ' +
+          'the user sees everything, including anything sensitive you type.',
+        inputSchema: {
+          runtimeId: z.string().describe('runtimeId from list_sessions'),
+          text: z
+            .string()
+            .min(1)
+            .max(4096)
+            .describe('Text to type; a newline may be included'),
+          submit: z
+            .boolean()
+            .optional()
+            .describe('Append Enter after the text (default true)'),
+          reason: z
+            .string()
+            .max(512)
+            .optional()
+            .describe('Short explanation shown on the approval card')
+        },
+        annotations: { readOnlyHint: false, destructiveHint: true }
+      },
+      async ({ runtimeId, text, submit, reason }) => {
+        try {
+          return textResult(await sendInput({ runtimeId, text, submit, reason }))
+        } catch (error) {
+          return toolFailure(error)
+        }
+      }
+    )
+  }
 
   return server
 }
@@ -324,6 +371,12 @@ async function bindServer(
   throw new Error('无法绑定 MCP 监听地址')
 }
 
+export interface AiMcpOptions {
+  host?: string
+  /** Exposes `send_input` through the approval broker; omit for read-only. */
+  sendInput?: SendInputHandler
+}
+
 /**
  * Start the MCP endpoint. It binds loopback by default; `options.host` may
  * select a NIC address (or 0.0.0.0) so a VM can reach it, which the UI warns
@@ -336,7 +389,7 @@ export async function startAiMcpServer(
   tap: SessionTap,
   userData: string,
   version: string,
-  options: { host?: string } = {}
+  options: AiMcpOptions = {}
 ): Promise<AiMcpHandle> {
   const saved = readSavedEndpoint(userData)
   // An explicit request is validated up front so the dialog can show an error,
@@ -368,7 +421,7 @@ export async function startAiMcpServer(
         sendJson(res, 400, { error: (error as Error).message })
         return
       }
-      const mcp = buildServer(tap, version)
+      const mcp = buildServer(tap, version, options.sendInput)
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
         enableJsonResponse: true
