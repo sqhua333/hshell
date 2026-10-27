@@ -1,12 +1,13 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { networkInterfaces } from 'node:os'
 import { join } from 'node:path'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
-import type { AiMcpInfo } from '@shared/types'
+import type { AiBindAddress, AiMcpInfo } from '@shared/types'
 import type { AiWaitOptions, SessionTap } from './session-tap'
 
 export type { AiMcpInfo }
@@ -190,10 +191,46 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(payload)
 }
 
+/** Default binding; a VM cannot reach this, which is the safe choice. */
+export const LOOPBACK_HOST = '127.0.0.1'
+/** Bind every interface, useful for NAT guests that reach the host via a gateway. */
+export const ANY_HOST = '0.0.0.0'
+
 interface SavedEndpoint {
   /** Preferred port so a previously registered client keeps working. */
   port: number | null
   token: string | null
+  host: string | null
+}
+
+/** Non-loopback IPv4 addresses that currently exist on this machine. */
+export function listBindAddresses(): AiBindAddress[] {
+  const result: AiBindAddress[] = []
+  for (const [name, entries] of Object.entries(networkInterfaces())) {
+    for (const entry of entries ?? []) {
+      // IPv6 adds bracket formatting and is rarely needed for a local VM.
+      if (entry.family === 'IPv4' && !entry.internal) {
+        result.push({ name, address: entry.address })
+      }
+    }
+  }
+  return result.sort(
+    (a, b) => a.name.localeCompare(b.name) || a.address.localeCompare(b.address)
+  )
+}
+
+export function isValidBindHost(host: string): boolean {
+  return (
+    host === LOOPBACK_HOST ||
+    host === ANY_HOST ||
+    listBindAddresses().some((item) => item.address === host)
+  )
+}
+
+/** The address a client should use when the server listens on 0.0.0.0. */
+function displayHost(host: string): string {
+  if (host !== ANY_HOST) return host
+  return listBindAddresses()[0]?.address ?? LOOPBACK_HOST
 }
 
 /**
@@ -207,6 +244,7 @@ function readSavedEndpoint(userData: string): SavedEndpoint {
     const raw = JSON.parse(readFileSync(join(userData, ENDPOINT_FILE), 'utf8')) as {
       port?: unknown
       token?: unknown
+      host?: unknown
     }
     const token =
       typeof raw.token === 'string' && /^[A-Za-z0-9_-]{32}$/.test(raw.token)
@@ -219,14 +257,18 @@ function readSavedEndpoint(userData: string): SavedEndpoint {
       raw.port < 65536
         ? raw.port
         : null
-    return { port, token }
+    // An adapter that disappeared since the last launch falls back to loopback
+    // instead of preventing the server from starting.
+    const host =
+      typeof raw.host === 'string' && isValidBindHost(raw.host) ? raw.host : null
+    return { port, token, host }
   } catch {
-    return { port: null, token: null }
+    return { port: null, token: null, host: null }
   }
 }
 
-/** Listen on `port` (0 = random) and report the port actually bound. */
-function listen(server: Server, port: number): Promise<number> {
+/** Listen on `host:port` (port 0 = random) and report the port actually bound. */
+function listen(server: Server, host: string, port: number): Promise<number> {
   return new Promise<number>((resolve, reject) => {
     const cleanup = (): void => {
       server.off('error', onError)
@@ -243,22 +285,66 @@ function listen(server: Server, port: number): Promise<number> {
     }
     server.once('error', onError)
     server.once('listening', onListening)
-    server.listen(port, '127.0.0.1')
+    server.listen(port, host)
   })
 }
 
 /**
- * Start the loopback-only MCP endpoint. The bearer token and port are written
- * to `userData/ai-mcp.json` (mode 0600) so the user can configure an MCP client
- * once; later launches reuse them when the port is still free. The server is
- * stateless and closes with the app.
+ * Bind the requested address, degrading gracefully: a taken port switches to
+ * a random one, and an adapter that vanished (VPN down) falls back to
+ * loopback. The caller reports the address actually bound.
+ */
+async function bindServer(
+  server: Server,
+  requestedHost: string,
+  preferredPort: number
+): Promise<{ host: string; port: number }> {
+  let host = requestedHost
+  let port = preferredPort
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      return { host, port: await listen(server, host, port) }
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if ((code === 'EADDRINUSE' || code === 'EACCES') && port !== 0) {
+        port = 0
+        continue
+      }
+      if (
+        host !== LOOPBACK_HOST &&
+        (code === 'EADDRNOTAVAIL' || code === 'ENETDOWN' || code === 'EINVAL')
+      ) {
+        host = LOOPBACK_HOST
+        port = preferredPort
+        continue
+      }
+      throw error
+    }
+  }
+  throw new Error('无法绑定 MCP 监听地址')
+}
+
+/**
+ * Start the MCP endpoint. It binds loopback by default; `options.host` may
+ * select a NIC address (or 0.0.0.0) so a VM can reach it, which the UI warns
+ * about explicitly. The bearer token and port are written to
+ * `userData/ai-mcp.json` (mode 0600) so the user can configure an MCP client
+ * once; later launches reuse them when the address is still available. The
+ * server is stateless and closes with the app.
  */
 export async function startAiMcpServer(
   tap: SessionTap,
   userData: string,
-  version: string
+  version: string,
+  options: { host?: string } = {}
 ): Promise<AiMcpHandle> {
   const saved = readSavedEndpoint(userData)
+  // An explicit request is validated up front so the dialog can show an error,
+  // while a stale saved adapter quietly falls back to loopback.
+  const host = options.host ?? saved.host ?? LOOPBACK_HOST
+  if (options.host !== undefined && !isValidBindHost(host)) {
+    throw new Error(`监听地址当前不可用：${host}`)
+  }
   const token = saved.token ?? randomBytes(24).toString('base64url')
   const server: Server = createServer((req, res) => {
     void (async () => {
@@ -301,26 +387,18 @@ export async function startAiMcpServer(
     })()
   })
 
-  let port: number
-  try {
-    port = await listen(server, saved.port ?? 0)
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code
-    // The saved port was taken since the last launch; keep the token (so the
-    // client's header stays valid) and pick any free port.
-    if (saved.port && (code === 'EADDRINUSE' || code === 'EACCES')) {
-      port = await listen(server, 0)
-    } else {
-      throw error
-    }
+  const bound = await bindServer(server, host, saved.port ?? 0)
+  const info: AiMcpInfo = {
+    // 0.0.0.0 is not a connectable address; show the first NIC instead.
+    url: `http://${displayHost(bound.host)}:${bound.port}/mcp`,
+    token,
+    host: bound.host
   }
-
-  const info: AiMcpInfo = { url: `http://127.0.0.1:${port}/mcp`, token }
   try {
     mkdirSync(userData, { recursive: true })
     writeFileSync(
       join(userData, ENDPOINT_FILE),
-      JSON.stringify({ ...info, port }, null, 2),
+      JSON.stringify({ ...info, port: bound.port }, null, 2),
       { mode: 0o600 }
     )
   } catch {

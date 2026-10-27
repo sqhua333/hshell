@@ -67,7 +67,9 @@ const api: HshellApi = {
     info: () => ipcRenderer.invoke('ai:info'),
     watched: () => ipcRenderer.invoke('ai:watched'),
     sessions: () => ipcRenderer.invoke('ai:sessions'),
-    setWatch: (runtimeId, watched) => ipcRenderer.invoke('ai:setWatch', runtimeId, watched)
+    setWatch: (runtimeId, watched) => ipcRenderer.invoke('ai:setWatch', runtimeId, watched),
+    bindAddresses: () => ipcRenderer.invoke('ai:bindAddresses'),
+    setHost: (host) => ipcRenderer.invoke('ai:setHost', host)
   },
   ssh: {
     connect: (req) => ipcRenderer.invoke('ssh:connect', req),

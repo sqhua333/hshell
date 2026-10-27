@@ -2933,3 +2933,18 @@ body.resizing-sidebar {
 .ai-warning {
   color: #b45309;
 }
+
+.ai-bind {
+  margin-bottom: 6px;
+}
+
+.ai-host-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-host-row select {
+  flex: 1;
+  min-width: 0;
+}

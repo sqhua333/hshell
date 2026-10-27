@@ -6,7 +6,14 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { afterEach, describe, expect, it } from 'vitest'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { Session } from '@shared/types'
-import { startAiMcpServer, type AiMcpHandle } from '../../src/main/ai/mcp-server'
+import {
+  ANY_HOST,
+  LOOPBACK_HOST,
+  isValidBindHost,
+  listBindAddresses,
+  startAiMcpServer,
+  type AiMcpHandle
+} from '../../src/main/ai/mcp-server'
 import { SessionTap } from '../../src/main/ai/session-tap'
 
 function makeSession(): Session {
@@ -39,10 +46,18 @@ afterEach(async () => {
   userData = null
 })
 
-async function connect(tap: SessionTap): Promise<Client> {
+async function connect(tap: SessionTap, host?: string): Promise<Client> {
   userData = mkdtempSync(join(tmpdir(), 'hshell-mcp-'))
-  handle = await startAiMcpServer(tap, userData, '0.0.0-test')
-  const transport = new StreamableHTTPClientTransport(new URL(handle.info.url), {
+  handle = await startAiMcpServer(
+    tap,
+    userData,
+    '0.0.0-test',
+    host === undefined ? {} : { host }
+  )
+  // 0.0.0.0 is a listen address, not a connectable one, so dial loopback.
+  const endpoint = new URL(handle.info.url)
+  if (handle.info.host === ANY_HOST) endpoint.hostname = LOOPBACK_HOST
+  const transport = new StreamableHTTPClientTransport(endpoint, {
     requestInit: {
       headers: { Authorization: `Bearer ${handle.info.token}` }
     }
@@ -79,16 +94,53 @@ describe('AI MCP server', () => {
     expect(forbidden.status).toBe(403)
   })
 
-  it('reuses the saved token and port across launches', async () => {
+  it('reuses the saved token, port and listen address across launches', async () => {
     userData = mkdtempSync(join(tmpdir(), 'hshell-mcp-'))
     const tap = new SessionTap()
-    const first = await startAiMcpServer(tap, userData, '0.0.0-test')
-    const { url, token } = first.info
+    const first = await startAiMcpServer(tap, userData, '0.0.0-test', {
+      host: ANY_HOST
+    })
+    const { url, token, host } = first.info
+    expect(host).toBe(ANY_HOST)
     await first.close()
 
     handle = await startAiMcpServer(tap, userData, '0.0.0-test')
     expect(handle.info.token).toBe(token)
     expect(handle.info.url).toBe(url)
+    expect(handle.info.host).toBe(ANY_HOST)
+  })
+
+  it('serves watched sessions when bound to all interfaces', async () => {
+    const tap = new SessionTap()
+    tap.register('rt-1', makeSession())
+    tap.setWatched('rt-1', true)
+    tap.recordOutput('rt-1', Buffer.from('from any interface'))
+    const client = await connect(tap, ANY_HOST)
+    const result = (await client.callTool({
+      name: 'read_session',
+      arguments: { runtimeId: 'rt-1' }
+    })) as CallToolResult
+    expect(textOf(result)).toContain('from any interface')
+    await client.close()
+  })
+
+  it('validates bind addresses and lists real IPv4 NICs only', async () => {
+    expect(isValidBindHost(LOOPBACK_HOST)).toBe(true)
+    expect(isValidBindHost(ANY_HOST)).toBe(true)
+    expect(isValidBindHost('203.0.113.9')).toBe(false)
+    for (const item of listBindAddresses()) {
+      expect(item.name).not.toBe('')
+      expect(item.address).toMatch(/^\d{1,3}(\.\d{1,3}){3}$/)
+    }
+  })
+
+  it('rejects an explicitly requested address that is not local', async () => {
+    userData = mkdtempSync(join(tmpdir(), 'hshell-mcp-'))
+    await expect(
+      startAiMcpServer(new SessionTap(), userData, '0.0.0-test', {
+        host: '203.0.113.9'
+      })
+    ).rejects.toThrow(/不可用/)
   })
 
   it('lists only read-only tools and only watched sessions', async () => {

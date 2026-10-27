@@ -24,7 +24,12 @@ import {
   windowLayoutSchema
 } from '@shared/schemas'
 import { createMenu } from './menu'
-import { startAiMcpServer, type AiMcpHandle } from './ai/mcp-server'
+import {
+  isValidBindHost,
+  listBindAddresses,
+  startAiMcpServer,
+  type AiMcpHandle
+} from './ai/mcp-server'
 import { SessionTap } from './ai/session-tap'
 import { logDiagnostic } from './diagnostics'
 import { AppStore } from './store'
@@ -191,16 +196,34 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     getWindow()?.webContents.send('hshell:event', event)
   }
   let aiMcp: AiMcpHandle | null = null
-  void startAiMcpServer(sessionTap, userData, app.getVersion())
-    .then((handle) => {
+  // Serialize bind/rebind calls: the startup bind and a host change from the
+  // dialog must not compete for the same port.
+  let aiQueue: Promise<unknown> = Promise.resolve()
+  const startAiServer = (host?: string): Promise<AiMcpHandle> => {
+    const run = aiQueue.then(async () => {
+      if (aiMcp) {
+        const previous = aiMcp
+        aiMcp = null
+        await previous.close()
+      }
+      const handle = await startAiMcpServer(
+        sessionTap,
+        userData,
+        app.getVersion(),
+        host === undefined ? {} : { host }
+      )
       aiMcp = handle
-      app.once('will-quit', () => {
-        void handle.close()
-      })
+      return handle
     })
-    .catch((error: unknown) => {
-      logDiagnostic(`ai mcp server failed ${(error as Error).message}`)
-    })
+    aiQueue = run.catch(() => undefined)
+    return run
+  }
+  void startAiServer().catch((error: unknown) => {
+    logDiagnostic(`ai mcp server failed ${(error as Error).message}`)
+  })
+  app.once('will-quit', () => {
+    void aiMcp?.close()
+  })
   const zmodemHost = {
     async pickDownloadDirectory(suggestedName?: string): Promise<string | null> {
       const win = getWindow()
@@ -617,6 +640,13 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   handle('ai:sessions', () => sessionTap.list())
   handle('ai:setWatch', (runtimeId: unknown, watched: unknown) => {
     sessionTap.setWatched(String(runtimeId), Boolean(watched))
+  })
+  handle('ai:bindAddresses', () => listBindAddresses())
+  handle('ai:setHost', async (value: unknown) => {
+    const host = String(value)
+    if (!isValidBindHost(host)) throw new Error(`监听地址当前不可用：${host}`)
+    const handle = await startAiServer(host)
+    return handle.info
   })
 
   handle('fs:home', () => os.homedir())

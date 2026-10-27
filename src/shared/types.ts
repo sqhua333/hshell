@@ -430,6 +430,15 @@ export interface AiMcpInfo {
   url: string
   /** Bearer token the client must send. */
   token: string
+  /** Address the server actually bound to (`127.0.0.1`, `0.0.0.0` or a NIC address). */
+  host: string
+}
+
+/** A non-loopback IPv4 address the MCP server can listen on for VM/LAN clients. */
+export interface AiBindAddress {
+  /** Interface name, e.g. `Ethernet` or `vEthernet (WSL)`. */
+  name: string
+  address: string
 }
 
 /** A session the user marked as readable by AI clients. */
@@ -546,6 +555,10 @@ export interface HshellApi {
     /** Names and buffer ranges for watched sessions (dialog display). */
     sessions(): Promise<AiSessionSummary[]>
     setWatch(runtimeId: string, watched: boolean): Promise<void>
+    /** Non-loopback IPv4 addresses HShell can bind the MCP server to. */
+    bindAddresses(): Promise<AiBindAddress[]>
+    /** Rebind the MCP server; `127.0.0.1` keeps it local. */
+    setHost(host: string): Promise<AiMcpInfo>
   }
   ssh: {
     connect(req: ConnectRequest): Promise<void>

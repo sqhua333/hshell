@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react'
-import type { AiMcpInfo, AiSessionSummary, SshStatus } from '@shared/types'
+import type {
+  AiBindAddress,
+  AiMcpInfo,
+  AiSessionSummary,
+  SshStatus
+} from '@shared/types'
 import { api } from '../api'
 import { formatBytes } from '../lib/format'
 import { tr } from '../lib/i18n'
@@ -39,6 +44,10 @@ function AiAccessDialogInner(): ReactElement {
 
   const [info, setInfo] = useState<AiMcpInfo | null>(null)
   const [sessions, setSessions] = useState<AiSessionSummary[]>([])
+  const [bindings, setBindings] = useState<AiBindAddress[]>([])
+  const [selectedHost, setSelectedHost] = useState('127.0.0.1')
+  const [applying, setApplying] = useState(false)
+  const [hostError, setHostError] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [copied, setCopied] = useState('')
@@ -50,9 +59,14 @@ function AiAccessDialogInner(): ReactElement {
   const reload = useCallback(async (): Promise<void> => {
     setLoading(true)
     try {
-      const [endpoint, list] = await Promise.all([api.ai.info(), api.ai.sessions()])
+      const [endpoint, list, addresses] = await Promise.all([
+        api.ai.info(),
+        api.ai.sessions(),
+        api.ai.bindAddresses()
+      ])
       setInfo(endpoint)
       setSessions(list)
+      setBindings(addresses)
       setError('')
     } catch (err) {
       setError((err as Error).message)
@@ -64,6 +78,12 @@ function AiAccessDialogInner(): ReactElement {
   useEffect(() => {
     void reload()
   }, [reload])
+
+  // Follow the live binding after load or after "Apply"; a manual selection is
+  // left alone until the server actually rebinds.
+  useEffect(() => {
+    if (info) setSelectedHost(info.host)
+  }, [info])
 
   // Keep the byte counts and status dots current while the dialog is open.
   useEffect(() => {
@@ -97,23 +117,65 @@ function AiAccessDialogInner(): ReactElement {
     }
   }
 
+  const applyHost = async (): Promise<void> => {
+    if (applying || (info && selectedHost === info.host)) return
+    setApplying(true)
+    setHostError('')
+    try {
+      const next = await api.ai.setHost(selectedHost)
+      setInfo(next)
+      addToast('info', tr(`MCP 监听地址已切换为 ${next.host}`, `MCP is now listening on ${next.host}`))
+    } catch (err) {
+      setHostError((err as Error).message)
+    } finally {
+      setApplying(false)
+    }
+  }
+
   const command = info
     ? `claude mcp add --transport http hshell ${info.url} --header "Authorization: Bearer ${info.token}"`
     : ''
+  const exposed = !!info && info.host !== '127.0.0.1'
+  const bindOptions = [
+    {
+      value: '127.0.0.1',
+      label: tr('仅本机（127.0.0.1）', 'This machine only (127.0.0.1)')
+    },
+    {
+      value: '0.0.0.0',
+      label: tr('所有网卡（0.0.0.0）', 'All interfaces (0.0.0.0)')
+    },
+    ...bindings.map((item) => ({
+      value: item.address,
+      label: `${item.name} · ${item.address}`
+    }))
+  ]
+  if (!bindOptions.some((option) => option.value === selectedHost)) {
+    bindOptions.push({ value: selectedHost, label: selectedHost })
+  }
 
   return (
     <Modal
       title={tr('AI 访问（MCP）', 'AI access (MCP)')}
-      subtitle={tr('只读 · 仅本机回环地址', 'Read-only · loopback only')}
+      subtitle={
+        exposed
+          ? tr(`只读 · 监听 ${info?.host}`, `Read-only · listening on ${info?.host}`)
+          : tr('只读 · 仅本机回环地址', 'Read-only · loopback only')
+      }
       onClose={() => setOpen(false)}
-      width={660}
+      width={680}
       footer={
         <>
           <span className="ai-footer-hint">
-            {tr(
-              '服务只监听 127.0.0.1，并校验 Bearer 令牌与 Origin。',
-              'The server listens on 127.0.0.1 only and checks the bearer token and Origin.'
-            )}
+            {exposed
+              ? tr(
+                  '服务监听在非回环地址，同一网络内拿到令牌的主机都能读取已观察的会话。',
+                  'The server is on a non-loopback address; any reachable host with the token can read watched sessions.'
+                )
+              : tr(
+                  '服务只监听 127.0.0.1，并校验 Bearer 令牌与 Origin。',
+                  'The server listens on 127.0.0.1 only and checks the bearer token and Origin.'
+                )}
           </span>
           <button className="btn" onClick={() => setOpen(false)}>
             {tr('关闭', 'Close')}
@@ -139,11 +201,50 @@ function AiAccessDialogInner(): ReactElement {
       {!loading && !info ? (
         <div className="form-hint">
           {tr(
-            'MCP 服务未启动，请重启 HShell 后重试。',
-            'The MCP server is not running. Restart HShell and try again.'
+            'MCP 服务未启动，可换一个监听地址重试。',
+            'The MCP server is not running. Try a different listen address.'
           )}
         </div>
       ) : null}
+
+      <div className="field ai-bind">
+        <span>{tr('MCP 监听地址', 'MCP listen address')}</span>
+        <div className="ai-host-row">
+          <select
+            value={selectedHost}
+            onChange={(event) => setSelectedHost(event.target.value)}
+            disabled={applying}
+          >
+            {bindOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <button
+            className="btn btn-small"
+            disabled={applying || (info ? selectedHost === info.host : false)}
+            onClick={() => void applyHost()}
+          >
+            {applying ? tr('应用中…', 'Applying…') : tr('应用', 'Apply')}
+          </button>
+        </div>
+        <p className="form-hint">
+          {tr(
+            '默认仅本机。要让虚拟机访问，请选择宿主机的 Host-Only 或桥接网卡地址，并在 Windows 防火墙放行该端口；VirtualBox NAT 可选「所有网卡」，虚拟机用 10.0.2.2 连接。切换会重启 MCP 服务，已连接的客户端需要重连。',
+            'Loopback by default. For a VM, pick the host’s Host-Only or bridged adapter and allow the port in Windows Firewall; with VirtualBox NAT choose “All interfaces” and connect via 10.0.2.2. Applying restarts the MCP server, so connected clients must reconnect.'
+          )}
+        </p>
+        {selectedHost !== '127.0.0.1' ? (
+          <p className="form-hint ai-warning">
+            {tr(
+              '非本机监听：同一网络内拿到令牌的主机都能读取已观察的会话。',
+              'Non-loopback: any host on that network with the token can read watched sessions.'
+            )}
+          </p>
+        ) : null}
+        {hostError ? <div className="form-error">{hostError}</div> : null}
+      </div>
 
       {info ? (
         <>
@@ -160,6 +261,15 @@ function AiAccessDialogInner(): ReactElement {
               </button>
             </div>
           </label>
+
+          {info.host === '0.0.0.0' ? (
+            <p className="form-hint ai-warning">
+              {tr(
+                '当前监听所有网卡；上面的地址用第一个网卡 IP 显示。虚拟机请按网络模式换成实际入口（VirtualBox NAT 为 10.0.2.2）。',
+                'Listening on all interfaces; the address above uses the first NIC IP. In the VM, use the actual entry for your network (10.0.2.2 for VirtualBox NAT).'
+              )}
+            </p>
+          ) : null}
 
           <label className="field">
             <span>{tr('访问令牌', 'Access token')}</span>
