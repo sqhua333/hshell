@@ -308,6 +308,11 @@ export function SessionSidebar(): ReactElement {
         icon: 'folder-plus',
         onClick: () => setFolderDialogOpen(true, folder.id)
       },
+      {
+        label: tr('重命名分组', 'Rename folder'),
+        icon: 'edit',
+        onClick: () => setFolderDialogOpen(true, null, folder.id)
+      },
       { label: '', separator: true },
       {
         label: tr('删除分组', 'Delete folder'),

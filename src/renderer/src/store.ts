@@ -158,6 +158,8 @@ interface AppState {
   aboutOpen: boolean
   folderDialogOpen: boolean
   folderParentId: string | null
+  /** Set while the folder dialog edits an existing folder instead of creating one. */
+  folderRenameId: string | null
   keysOpen: boolean
   tunnelsOpen: boolean
   appVersion: string
@@ -240,9 +242,14 @@ interface AppState {
   deleteSession(id: string): Promise<void>
   deleteFolder(id: string): Promise<void>
   createFolder(name: string, parentId: string | null): Promise<void>
+  renameFolder(id: string, name: string): Promise<void>
   setShortcutsHelp(open: boolean): void
 
-  setFolderDialogOpen(open: boolean, parentId?: string | null): void
+  setFolderDialogOpen(
+    open: boolean,
+    parentId?: string | null,
+    renameFolderId?: string | null
+  ): void
   setAboutOpen(open: boolean): void
   setKeysOpen(open: boolean): void
   setTunnelsOpen(open: boolean): void
@@ -422,6 +429,7 @@ export const useApp = create<AppState>((set, get) => ({
   aboutOpen: false,
   folderDialogOpen: false,
   folderParentId: null,
+  folderRenameId: null,
   keysOpen: false,
   tunnelsOpen: false,
   appVersion: '0.2.3',
@@ -1189,12 +1197,24 @@ export const useApp = create<AppState>((set, get) => ({
     get().addToast('info', tr(`分组「${name}」已创建`, `Folder "${name}" created`))
   },
 
+  async renameFolder(id, name) {
+    const folder = get().folders.find((item) => item.id === id)
+    if (!folder) return
+    await api.sessions.saveFolder({ ...folder, name })
+    await get().reloadSessions()
+    get().addToast('info', tr(`分组已重命名为「${name}」`, `Folder renamed to "${name}"`))
+  },
+
   setShortcutsHelp(open) {
     set({ shortcutsHelp: open })
   },
 
-  setFolderDialogOpen(open, parentId = null) {
-    set({ folderDialogOpen: open, folderParentId: open ? parentId : null })
+  setFolderDialogOpen(open, parentId = null, renameFolderId = null) {
+    set({
+      folderDialogOpen: open,
+      folderParentId: open ? parentId : null,
+      folderRenameId: open ? renameFolderId : null
+    })
   },
 
   setAboutOpen(open) {

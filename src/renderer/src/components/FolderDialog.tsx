@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from 'react'
+import { useEffect, useState, type ReactElement } from 'react'
 import { tr } from '../lib/i18n'
 import { useApp } from '../store'
 import { Modal } from './Modal'
@@ -7,9 +7,24 @@ export function FolderDialog(): ReactElement | null {
   const open = useApp((state) => state.folderDialogOpen)
   const setOpen = useApp((state) => state.setFolderDialogOpen)
   const createFolder = useApp((state) => state.createFolder)
+  const renameFolder = useApp((state) => state.renameFolder)
   const folderParentId = useApp((state) => state.folderParentId)
+  const folderRenameId = useApp((state) => state.folderRenameId)
+  const folders = useApp((state) => state.folders)
   const [name, setName] = useState('')
   const [error, setError] = useState('')
+
+  const renaming = folderRenameId
+    ? folders.find((folder) => folder.id === folderRenameId) ?? null
+    : null
+
+  useEffect(() => {
+    if (!open) return
+    setName(renaming?.name ?? '')
+    setError('')
+    // Re-seed the field when the dialog opens or changes target.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, folderRenameId])
 
   if (!open) return null
 
@@ -20,7 +35,8 @@ export function FolderDialog(): ReactElement | null {
       return
     }
     try {
-      await createFolder(value, folderParentId)
+      if (renaming) await renameFolder(renaming.id, value)
+      else await createFolder(value, folderParentId)
       setName('')
       setError('')
       setOpen(false)
@@ -29,9 +45,11 @@ export function FolderDialog(): ReactElement | null {
     }
   }
 
+  const submitLabel = renaming ? tr('保存', 'Save') : tr('创建', 'Create')
+
   return (
     <Modal
-      title={tr('新建分组', 'New folder')}
+      title={renaming ? tr('重命名分组', 'Rename folder') : tr('新建分组', 'New folder')}
       width={420}
       onClose={() => setOpen(false)}
       footer={
@@ -42,7 +60,7 @@ export function FolderDialog(): ReactElement | null {
               {tr('取消', 'Cancel')}
             </button>
             <button className="btn btn-primary" onClick={() => void submit()}>
-              {tr('创建', 'Create')}
+              {submitLabel}
             </button>
           </div>
         </>

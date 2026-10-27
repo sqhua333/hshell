@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement } from 'react'
+import { useEffect, useState, type FocusEvent, type ReactElement } from 'react'
 import type {
   AuthConfig,
   AuthMethod,
@@ -28,6 +28,18 @@ function ruleId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
 }
 
+/**
+ * Stands in for a password stored encrypted on disk. The plaintext never
+ * reaches the renderer, so the dialog shows this mask and only a value the user
+ * actually types is written back; leaving the mask alone keeps the credential.
+ */
+const SAVED_PASSWORD_MASK = '********'
+
+/** Clear the stand-in when the field is focused so typing replaces it. */
+function selectSavedMask(event: FocusEvent<HTMLInputElement>): void {
+  if (event.currentTarget.value === SAVED_PASSWORD_MASK) event.currentTarget.select()
+}
+
 /** Editable jump host; the port stays a string while the user types. */
 interface JumpDraft {
   id: string
@@ -45,7 +57,16 @@ function initialJumpHosts(initial: Session | null): JumpDraft[] {
       host: jump.host,
       port: String(jump.port),
       username: jump.username ?? '',
-      auth: jump.auth ? { ...jump.auth } : undefined
+      auth: jump.auth
+        ? {
+            ...jump.auth,
+            // A saved hop password is decrypted in the main process only.
+            password:
+              jump.auth.method === 'password' && jump.auth.savePassword
+                ? SAVED_PASSWORD_MASK
+                : jump.auth.password
+          }
+        : undefined
     }))
   }
   let hops: ReturnType<typeof parseProxyJump> = []
@@ -146,7 +167,9 @@ function SessionDialogInner({
   const [keyPath, setKeyPath] = useState(initial?.auth.keyPath ?? '~/.ssh/id_rsa')
   const [keyId, setKeyId] = useState(initial?.auth.keyId ?? '')
   const [vaultKeys, setVaultKeys] = useState<KeyMetadata[]>([])
-  const [password, setPassword] = useState('')
+  const [password, setPassword] = useState(
+    initial?.auth.savePassword ? SAVED_PASSWORD_MASK : ''
+  )
   const [savePassword, setSavePassword] = useState(initial?.auth.savePassword ?? false)
   const [passphrase, setPassphrase] = useState('')
   const [colorScheme, setColorScheme] = useState(
@@ -304,7 +327,11 @@ function SessionDialogInner({
           if (jumpAuth.method === 'password') {
             cleanedAuth = {
               method: 'password',
-              password: jumpAuth.password || undefined,
+              // The mask is not a password: omit it so the stored one survives.
+              password:
+                jumpAuth.password === SAVED_PASSWORD_MASK
+                  ? undefined
+                  : jumpAuth.password || undefined,
               savePassword: Boolean(jumpAuth.savePassword)
             }
           } else if (jumpAuth.method === 'key') {
@@ -427,6 +454,8 @@ function SessionDialogInner({
     }
 
     const now = Date.now()
+    // Only a password the user typed may replace the stored credential.
+    const passwordValue = password === SAVED_PASSWORD_MASK ? '' : password
     const session: Session = {
       id: initial?.id ?? `session-${now}-${Math.random().toString(36).slice(2, 7)}`,
       name: name.trim() || (isSerial ? serialValue : hostValue),
@@ -471,18 +500,18 @@ function SessionDialogInner({
         : isTelnet
           ? {
               method: 'password',
-              password: autoLogin ? password : undefined,
+              password: autoLogin ? passwordValue : undefined,
               savePassword: autoLogin ? savePassword : undefined
             }
           : isFtp
-            ? { method: 'password', password, savePassword }
+            ? { method: 'password', password: passwordValue, savePassword }
             : {
                 method,
                 keyPath: method === 'key' && !keyId ? keyPath.trim() : undefined,
                 keyId: method === 'key' && keyId ? keyId : undefined,
                 password:
                   method === 'password'
-                    ? password
+                    ? passwordValue
                     : method === 'key' && !keyId && passphrase
                       ? passphrase
                       : undefined,
@@ -748,9 +777,13 @@ function SessionDialogInner({
                             type="password"
                             value={password}
                             onChange={(event) => setPassword(event.target.value)}
+                            onFocus={selectSavedMask}
                             placeholder={
                               initial?.auth.savePassword
-                                ? tr('已保存；留空保持不变', 'Saved; leave blank to keep it')
+                                ? tr(
+                                    '已保存（本机加密）；输入新密码可覆盖',
+                                    'Saved (encrypted locally); type a new password to replace it'
+                                  )
                                 : tr('仅保存在内存中', 'Kept in memory only')
                             }
                           />
@@ -804,9 +837,13 @@ function SessionDialogInner({
                         type="password"
                         value={password}
                         onChange={(event) => setPassword(event.target.value)}
+                        onFocus={selectSavedMask}
                         placeholder={
                           initial?.auth.savePassword
-                            ? tr('已保存；留空保持不变', 'Saved; leave blank to keep it')
+                            ? tr(
+                                '已保存（本机加密）；输入新密码可覆盖',
+                                'Saved (encrypted locally); type a new password to replace it'
+                              )
                             : tr('仅保存在内存中', 'Kept in memory only')
                         }
                       />
@@ -1041,9 +1078,13 @@ function SessionDialogInner({
                                   onChange={(event) =>
                                     updateJumpAuth(jump.id, { password: event.target.value })
                                   }
+                                  onFocus={selectSavedMask}
                                   placeholder={
                                     jump.auth?.savePassword
-                                      ? tr('已保存；留空保持不变', 'Saved; leave blank to keep it')
+                                      ? tr(
+                                          '已保存（本机加密）；输入新密码可覆盖',
+                                          'Saved (encrypted locally); type a new password to replace it'
+                                        )
                                       : tr('仅保存在内存中', 'Kept in memory only')
                                   }
                                 />
@@ -1237,9 +1278,13 @@ function SessionDialogInner({
                         type="password"
                         value={password}
                         onChange={(event) => setPassword(event.target.value)}
+                        onFocus={selectSavedMask}
                         placeholder={
                           initial?.auth.savePassword
-                            ? tr('已保存；留空保持不变', 'Saved; leave blank to keep it')
+                            ? tr(
+                                '已保存（本机加密）；输入新密码可覆盖',
+                                'Saved (encrypted locally); type a new password to replace it'
+                              )
                             : tr('仅保存在内存中', 'Kept in memory only')
                         }
                       />
