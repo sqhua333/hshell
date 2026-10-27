@@ -334,6 +334,8 @@ export type AppEvent =
   | ({ type: 'sftp:progress' } & SftpProgressEvent)
   | ({ type: 'tunnel:status' } & TunnelInfo)
   | { type: 'ai:input-request'; request: AiInputRequest }
+  /** Approved input was just written; the renderer tints the echoed line. */
+  | { type: 'ai:input-sent'; runtimeId: string; text: string }
   | {
       type: 'ai:input-result'
       id: string

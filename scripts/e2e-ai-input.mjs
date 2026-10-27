@@ -12,7 +12,7 @@
  * Usage: npm run e2e:ai-input
  */
 import { spawn } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -249,6 +249,22 @@ try {
     `)
   )
   if (!ran.includes('AI_E2E_OK')) fail('approved command did not run', ran)
+  const decoration = await evaluate(
+    ui(`
+      await waitFor(
+        () => document.querySelector('.xterm-decoration-container .xterm-decoration'),
+        'AI echo decoration'
+      )
+      return {
+        decorations: document.querySelectorAll('.xterm-decoration-container .xterm-decoration').length
+      }
+    `)
+  )
+  if (decoration.decorations < 1) fail('AI echo was not decorated', decoration)
+  if (process.env.E2E_AI_SHOT) {
+    const shot = await send('Page.captureScreenshot', { format: 'png' })
+    writeFileSync(process.env.E2E_AI_SHOT, Buffer.from(shot.data, 'base64'))
+  }
   console.log('AI_INPUT_EXECUTE_OK')
 
   // 2. Deny: nothing is written.

@@ -104,6 +104,19 @@ describe('AI session writer', () => {
     expect(h.results()[0]?.status).toBe('sent')
   })
 
+  it('announces the written text so the pane can tint the echo', async () => {
+    const h = harness()
+    const pending = h.writer.request({ runtimeId: 'rt-1', text: 'ls -la' })
+    await Promise.resolve()
+    h.writer.decide(h.requests()[0].id, true)
+    await pending
+    expect(h.events).toContainEqual({
+      type: 'ai:input-sent',
+      runtimeId: 'rt-1',
+      text: 'ls -la\r'
+    })
+  })
+
   it('denies without writing when the user rejects', async () => {
     const h = harness()
     const pending = h.writer.request({ runtimeId: 'rt-1', text: 'reboot' })

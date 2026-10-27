@@ -4,7 +4,7 @@ import { api } from './api'
 import { runAction } from './commands'
 import { tr } from './lib/i18n'
 import { isEditingField, matchShortcut } from './lib/shortcuts'
-import { publishRuntimeData } from './lib/runtime-bus'
+import { publishRuntimeAiInput, publishRuntimeData } from './lib/runtime-bus'
 import { useApp } from './store'
 import { AboutDialog } from './components/AboutDialog'
 import { AiAccessDialog } from './components/AiAccessDialog'
@@ -142,6 +142,9 @@ export default function App(): ReactElement {
           break
         case 'ai:input-request':
           state.setAiInputRequest(event.request)
+          break
+        case 'ai:input-sent':
+          publishRuntimeAiInput(event.runtimeId, event.text)
           break
         case 'ai:input-result':
           if (state.aiInputRequest?.id === event.id) state.setAiInputRequest(null)

@@ -211,6 +211,9 @@ export function createSessionWriter(deps: SessionWriterDeps): SessionWriter {
       return
     }
     deps.tap.recordInput(req.runtimeId, data, 'ai')
+    // Emitted after the write but before the echo arrives, so the renderer can
+    // recognise and tint the echoed line without touching the terminal stream.
+    deps.emit({ type: 'ai:input-sent', runtimeId: req.runtimeId, text: data })
     lastSentAt = now()
     settle(entry, { status: 'sent' })
   }

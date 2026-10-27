@@ -1,8 +1,10 @@
 type DataHandler = (data: Uint8Array) => void
 type StatusHandler = (status: { status: string; message?: string }) => void
+type AiInputHandler = (text: string) => void
 
 const dataHandlers = new Map<string, Set<DataHandler>>()
 const statusHandlers = new Map<string, Set<StatusHandler>>()
+const aiInputHandlers = new Map<string, Set<AiInputHandler>>()
 
 export function subscribeRuntimeData(runtimeId: string, handler: DataHandler): () => void {
   let set = dataHandlers.get(runtimeId)
@@ -39,4 +41,25 @@ export function publishRuntimeStatus(
   status: { status: string; message?: string }
 ): void {
   statusHandlers.get(runtimeId)?.forEach((handler) => handler(status))
+}
+
+/** Tells the pane which text an AI just typed, so it can tint the echo. */
+export function subscribeRuntimeAiInput(
+  runtimeId: string,
+  handler: AiInputHandler
+): () => void {
+  let set = aiInputHandlers.get(runtimeId)
+  if (!set) {
+    set = new Set()
+    aiInputHandlers.set(runtimeId, set)
+  }
+  set.add(handler)
+  return () => {
+    set?.delete(handler)
+    if (set?.size === 0) aiInputHandlers.delete(runtimeId)
+  }
+}
+
+export function publishRuntimeAiInput(runtimeId: string, text: string): void {
+  aiInputHandlers.get(runtimeId)?.forEach((handler) => handler(text))
 }

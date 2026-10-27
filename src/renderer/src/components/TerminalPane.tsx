@@ -14,7 +14,7 @@ import { findHighlightLines, OutputRuleEngine, stripAnsi } from '../lib/output-r
 import { handlePasswordKeys } from '../lib/password-input'
 import { recorder } from '../lib/recorder'
 import { resolveClipboardKey } from '../lib/terminal-clipboard'
-import { subscribeRuntimeData } from '../lib/runtime-bus'
+import { subscribeRuntimeAiInput, subscribeRuntimeData } from '../lib/runtime-bus'
 import { formatClock } from '../lib/terminal-stamps'
 import { registerTerminal } from '../lib/terminal-registry'
 import { useApp } from '../store'
@@ -35,6 +35,223 @@ const HIGHLIGHT_BACKGROUND = '#ffd54f'
 const MAX_DECORATIONS = 400
 /** Bound the marker list; disposed markers are pruned on every repaint. */
 const MAX_LINE_STAMPS = 2000
+/** How long to wait for the remote to echo AI input before giving up. */
+const AI_ECHO_TIMEOUT_MS = 15_000
+/** Keep enough stream to match an echo split across chunks. */
+const AI_ECHO_TAIL_CHARS = 16 * 1024
+/**
+ * Line editors such as ble.sh erase and repaint the command after receiving
+ * the input, which also disposes xterm markers on that line. Wait for the
+ * repaint to settle before anchoring the decoration, and re-anchor if another
+ * repaint erases it.
+ */
+const AI_ECHO_SETTLE_MS = 200
+const AI_ECHO_RETRY_MS = 120
+const AI_ECHO_RETRY_LIMIT = 15
+/** Stop chasing repaints this long after the echo; the line is final by then. */
+const AI_ECHO_RETRY_WINDOW_MS = 3_000
+const AI_TINT = { dark: '#8b5cf6', light: '#7c3aed' } as const
+
+type Schedule = (callback: () => void, delay?: number) => void
+
+interface PendingAiEcho {
+  text: string
+  expiresAt: number
+}
+
+/** Decoration(s) marking one echoed AI input while the shell may repaint it. */
+interface AiEchoAnchor {
+  needle: string
+  extraLines: number
+  expectedLine: number
+  background: string
+  expiresAt: number
+  attempts: number
+  pending: boolean
+  stopped: boolean
+  /** Set while disposing our own markers, so their disposal is not retried. */
+  releasing: boolean
+  entries: AppliedDecoration[]
+}
+
+function parseHex(value: string): [number, number, number] | null {
+  const match = /^#([0-9a-f]{6})$/i.exec(value)
+  if (!match) return null
+  const int = Number.parseInt(match[1], 16)
+  return [(int >> 16) & 0xff, (int >> 8) & 0xff, int & 0xff]
+}
+
+/**
+ * Decoration colours accept only solid #RRGGBB, so blend the AI tint over the
+ * palette background ourselves: a soft band that stays readable on any theme.
+ */
+function aiEchoBackground(session: Session): string {
+  const scheme = resolveColorScheme(session.terminal.colorScheme, session.terminal.theme)
+  const background = scheme.theme.background ?? (scheme.dark ? '#000000' : '#ffffff')
+  const base = parseHex(background)
+  const tint = parseHex(scheme.dark ? AI_TINT.dark : AI_TINT.light)
+  if (!base || !tint) return scheme.dark ? '#2a2140' : '#efe7fd'
+  const alpha = scheme.dark ? 0.24 : 0.14
+  const mixed = tint.map((value, index) =>
+    Math.round(base[index] + (value - base[index]) * alpha)
+  )
+  return `#${mixed.map((value) => value.toString(16).padStart(2, '0')).join('')}`
+}
+
+function aiEchoDecoration(
+  term: Terminal,
+  lineFromEnd: number,
+  background: string
+): AppliedDecoration | null {
+  try {
+    const marker = term.registerMarker(-lineFromEnd)
+    if (!marker) return null
+    const decoration = term.registerDecoration({
+      marker,
+      x: 0,
+      width: term.cols,
+      backgroundColor: background,
+      layer: 'bottom'
+    })
+    if (!decoration) {
+      marker.dispose()
+      return null
+    }
+    return { decoration, marker }
+  } catch {
+    /* the terminal may be disposing while output is still in flight */
+    return null
+  }
+}
+
+/** The expected line after a repaint, or the nearest line with the same text. */
+function locateAiEchoLine(term: Terminal, expected: number, needle: string): number | null {
+  const buffer = term.buffer.active
+  const first = needle.split('\n')[0]
+  if (!first) return null
+  for (let delta = 0; delta <= 3; delta += 1) {
+    const candidates = delta === 0 ? [expected] : [expected + delta, expected - delta]
+    for (const candidate of candidates) {
+      if (candidate < 0 || candidate >= buffer.length) continue
+      const text = buffer.getLine(candidate)?.translateToString(true) ?? ''
+      if (text.includes(first)) return candidate
+    }
+  }
+  return null
+}
+
+function clearAiEchoEntries(anchor: AiEchoAnchor): void {
+  anchor.releasing = true
+  for (const entry of anchor.entries) {
+    entry.decoration.dispose()
+    if (!entry.marker.isDisposed) entry.marker.dispose()
+  }
+  anchor.entries = []
+  anchor.releasing = false
+}
+
+function releaseAiEcho(anchor: AiEchoAnchor): void {
+  anchor.stopped = true
+  clearAiEchoEntries(anchor)
+}
+
+/**
+ * Anchor the tint to the line the echo now sits on. The shell may erase the
+ * line again to repaint it; a disposed marker then schedules another attempt
+ * until the line settles.
+ */
+function anchorAiEcho(term: Terminal, anchor: AiEchoAnchor, schedule: Schedule): void {
+  if (anchor.stopped) return
+  clearAiEchoEntries(anchor)
+  const line = locateAiEchoLine(term, anchor.expectedLine, anchor.needle)
+  if (line === null) {
+    retryAiEcho(term, anchor, schedule)
+    return
+  }
+  anchor.expectedLine = line
+  const buffer = term.buffer.active
+  const cursorLine = buffer.baseY + buffer.cursorY
+  for (let index = 0; index <= anchor.extraLines; index += 1) {
+    const lineFromEnd = cursorLine - (line + index)
+    if (lineFromEnd < 0) continue
+    const entry = aiEchoDecoration(term, lineFromEnd, anchor.background)
+    if (!entry) continue
+    entry.marker.onDispose(() => {
+      if (anchor.stopped || anchor.releasing) return
+      retryAiEcho(term, anchor, schedule)
+    })
+    anchor.entries.push(entry)
+  }
+  if (anchor.entries.length === 0) retryAiEcho(term, anchor, schedule)
+}
+
+function retryAiEcho(term: Terminal, anchor: AiEchoAnchor, schedule: Schedule): void {
+  if (anchor.stopped || anchor.pending) return
+  if (anchor.attempts >= AI_ECHO_RETRY_LIMIT || Date.now() > anchor.expiresAt) return
+  anchor.attempts += 1
+  anchor.pending = true
+  schedule(() => {
+    anchor.pending = false
+    anchorAiEcho(term, anchor, schedule)
+  }, AI_ECHO_RETRY_MS)
+}
+
+/**
+ * Mark the line(s) the remote echoed an approved AI input on. The text comes
+ * from the writer before the echo arrives; matching it in the output keeps the
+ * highlight off the shell's own prompt and output. Anchoring is delayed until
+ * the line editor finishes repainting the line.
+ */
+function applyAiInputEcho(
+  term: Terminal,
+  stream: string,
+  pending: PendingAiEcho[],
+  anchors: AiEchoAnchor[],
+  session: Session,
+  now: number,
+  schedule: Schedule
+): void {
+  if (pending.length === 0 || !stream) return
+  // The tty translates the input's Enters into CR LF; ignore CR so the match
+  // does not depend on how the echo spells the line break.
+  const clean = stripAnsi(stream).replace(/\r/g, '')
+  for (let index = pending.length - 1; index >= 0; index -= 1) {
+    const item = pending[index]
+    if (now > item.expiresAt) {
+      pending.splice(index, 1)
+      continue
+    }
+    const needle = stripAnsi(item.text)
+      .replace(/\r/g, '')
+      .replace(/\n+$/, '')
+    if (!needle) {
+      pending.splice(index, 1)
+      continue
+    }
+    // A repainting line editor can echo the text twice; the later occurrence
+    // is the one that ends up on screen with the prompt.
+    const at = clean.lastIndexOf(needle)
+    if (at < 0) continue
+    pending.splice(index, 1)
+    const startFromEnd = (clean.slice(at).match(/\n/g) ?? []).length
+    const buffer = term.buffer.active
+    const anchor: AiEchoAnchor = {
+      needle,
+      extraLines: (needle.match(/\n/g) ?? []).length,
+      expectedLine: buffer.baseY + buffer.cursorY - startFromEnd,
+      background: aiEchoBackground(session),
+      expiresAt: now + AI_ECHO_RETRY_WINDOW_MS,
+      attempts: 0,
+      pending: false,
+      stopped: false,
+      releasing: false,
+      entries: []
+    }
+    anchors.push(anchor)
+    while (anchors.length > 8) releaseAiEcho(anchors.shift()!)
+    schedule(() => anchorAiEcho(term, anchor, schedule), AI_ECHO_SETTLE_MS)
+  }
+}
 
 /** Decorate whole lines that match a highlight rule. */
 function applyHighlights(
@@ -299,6 +516,25 @@ export function TerminalPane({
     const renderDisposable = term.onRender(scheduleStamps)
     const scrollDisposable = term.onScroll(() => scheduleStamps())
 
+    // AI input is echoed by the remote; remember what was typed so the echo can
+    // be tinted. Resetting the tail avoids matching a previous identical echo.
+    const pendingAiEchoes: PendingAiEcho[] = []
+    const aiEchoAnchors: AiEchoAnchor[] = []
+    let aiEchoTail = ''
+    const aiSettleTimers = new Set<number>()
+    const scheduleAiSettle: Schedule = (callback, delay = AI_ECHO_SETTLE_MS) => {
+      const timer = window.setTimeout(() => {
+        aiSettleTimers.delete(timer)
+        callback()
+      }, delay)
+      aiSettleTimers.add(timer)
+    }
+    const unsubscribeAiInput = subscribeRuntimeAiInput(runtimeId, (text) => {
+      aiEchoTail = ''
+      pendingAiEchoes.push({ text, expiresAt: Date.now() + AI_ECHO_TIMEOUT_MS })
+      while (pendingAiEchoes.length > 8) pendingAiEchoes.shift()
+    })
+
     const unsubscribeData = subscribeRuntimeData(runtimeId, (data) => {
       const text = decoder.decode(data, { stream: true })
       recorder.recordOutput(runtimeId, text)
@@ -308,6 +544,16 @@ export function TerminalPane({
       term.write(data, () => {
         void api.ssh.ack(runtimeId, data.byteLength)
         applyHighlights(term, text, sessionRef.current, decorationsRef.current)
+        aiEchoTail = (aiEchoTail + text).slice(-AI_ECHO_TAIL_CHARS)
+        applyAiInputEcho(
+          term,
+          aiEchoTail,
+          pendingAiEchoes,
+          aiEchoAnchors,
+          sessionRef.current,
+          Date.now(),
+          scheduleAiSettle
+        )
       })
       const current = sessionRef.current
       triggerEngineRef.current.feed(stripAnsi(text), current.triggers ?? [], (match) => {
@@ -380,6 +626,10 @@ export function TerminalPane({
       window.removeEventListener('resize', performFit)
       container.removeEventListener('pointerdown', pointerHandler, true)
       unsubscribeData()
+      unsubscribeAiInput()
+      aiSettleTimers.forEach((timer) => window.clearTimeout(timer))
+      aiSettleTimers.clear()
+      aiEchoAnchors.forEach(releaseAiEcho)
       dataDisposable.dispose()
       resizeDisposable.dispose()
       lineFeedDisposable.dispose()
