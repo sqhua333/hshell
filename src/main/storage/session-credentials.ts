@@ -12,6 +12,10 @@ export function jumpCredentialId(sessionId: string, jumpId: string): string {
   return `jump:${sessionId}:${jumpId}`
 }
 
+export function serialLoginCredentialId(sessionId: string): string {
+  return `serial-login:${sessionId}`
+}
+
 /**
  * Fill in passwords that were saved encrypted on disk. Explicit values from
  * the renderer always win; saved jump credentials are restored per hop.
@@ -21,6 +25,18 @@ export function attachStoredCredentials(session: Session, lookup: CredentialLook
   if (next.auth.method === 'password' && !next.auth.password) {
     const saved = lookup.get(sessionCredentialId(next.id))
     if (saved) next = { ...next, auth: { ...next.auth, password: saved } }
+  }
+  if (
+    next.serial?.login?.savePassword &&
+    !next.serial.login.password
+  ) {
+    const saved = lookup.get(serialLoginCredentialId(next.id))
+    if (saved) {
+      next = {
+        ...next,
+        serial: { ...next.serial, login: { ...next.serial.login, password: saved } }
+      }
+    }
   }
   if (next.jumpHosts?.length) {
     const jumpHosts = next.jumpHosts.map((jump) => {

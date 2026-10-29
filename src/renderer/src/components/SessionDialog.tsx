@@ -162,6 +162,24 @@ function SessionDialogInner({
   )
   const [dtr, setDtr] = useState(initial?.serial?.dtr ?? true)
   const [rts, setRts] = useState(initial?.serial?.rts ?? true)
+  const [serialLoginEnabled, setSerialLoginEnabled] = useState(
+    initial?.serial?.login?.enabled ?? false
+  )
+  const [serialLoginUser, setSerialLoginUser] = useState(
+    initial?.serial?.login?.username ?? 'root'
+  )
+  const [serialLoginPassword, setSerialLoginPassword] = useState(
+    initial?.serial?.login?.savePassword ? SAVED_PASSWORD_MASK : ''
+  )
+  const [serialLoginSavePassword, setSerialLoginSavePassword] = useState(
+    initial?.serial?.login?.savePassword ?? false
+  )
+  const [serialLoginPrompt, setSerialLoginPrompt] = useState(
+    initial?.serial?.login?.loginPrompt ?? ''
+  )
+  const [serialLoginPasswordPrompt, setSerialLoginPasswordPrompt] = useState(
+    initial?.serial?.login?.passwordPrompt ?? ''
+  )
   const [folderId, setFolderId] = useState<string>(initial?.folderId ?? presetFolderId ?? '')
   const [method, setMethod] = useState<AuthMethod>(initial?.auth.method ?? 'password')
   const [keyPath, setKeyPath] = useState(initial?.auth.keyPath ?? '~/.ssh/id_rsa')
@@ -372,6 +390,21 @@ function SessionDialogInner({
         setError(tr('波特率必须是 50 到 4000000 之间的整数', 'Baud rate must be an integer between 50 and 4000000'))
         return
       }
+      if (serialLoginEnabled && !serialLoginUser.trim()) {
+        setTab('connection')
+        setError(tr('自动登录需要填写登录用户名', 'Auto login needs a username'))
+        return
+      }
+      if (
+        serialLoginEnabled &&
+        serialLoginSavePassword &&
+        !serialLoginPassword &&
+        !initial?.serial?.login?.savePassword
+      ) {
+        setTab('connection')
+        setError(tr('勾选保存密码时需要填写密码', 'Enter a password to save it'))
+        return
+      }
     } else if (needsHost) {
       if (!hostValue) {
         setTab('connection')
@@ -473,7 +506,20 @@ function SessionDialogInner({
             parity,
             flowControl,
             dtr,
-            rts
+            rts,
+            login: serialLoginEnabled
+              ? {
+                  enabled: true,
+                  username: serialLoginUser.trim(),
+                  password:
+                    serialLoginPassword === SAVED_PASSWORD_MASK
+                      ? undefined
+                      : serialLoginPassword,
+                  savePassword: serialLoginSavePassword || undefined,
+                  loginPrompt: serialLoginPrompt.trim() || undefined,
+                  passwordPrompt: serialLoginPasswordPrompt.trim() || undefined
+                }
+              : undefined
           }
         : undefined,
       telnet: isTelnet
@@ -1226,6 +1272,91 @@ function SessionDialogInner({
                     <span>RTS</span>
                   </label>
                 </div>
+              ) : null}
+              {connectionType === 'serial' ? (
+                <>
+                  <div className="section-title">
+                    {tr('控制台自动登录（可选）', 'Console auto login (optional)')}
+                  </div>
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={serialLoginEnabled}
+                      onChange={(event) => setSerialLoginEnabled(event.target.checked)}
+                    />
+                    {tr(
+                      '连接后收到登录提示时自动发送账号和密码',
+                      'Send the username and password when the console prompts for them'
+                    )}
+                  </label>
+                  {serialLoginEnabled ? (
+                    <>
+                      <div className="form-grid">
+                        <label className="field">
+                          <span>{tr('登录用户名', 'Login username')}</span>
+                          <input
+                            className="input"
+                            value={serialLoginUser}
+                            onChange={(event) => setSerialLoginUser(event.target.value)}
+                            placeholder="root"
+                          />
+                        </label>
+                        <label className="field">
+                          <span>{tr('登录密码', 'Login password')}</span>
+                          <input
+                            className="input"
+                            type="password"
+                            value={serialLoginPassword}
+                            onChange={(event) => setSerialLoginPassword(event.target.value)}
+                            onFocus={selectSavedMask}
+                            placeholder={
+                              initial?.serial?.login?.savePassword
+                                ? tr(
+                                    '已保存（本机加密）；输入新密码可覆盖',
+                                    'Saved (encrypted locally); type a new password to replace it'
+                                  )
+                                : tr('仅保存在内存中', 'Kept in memory only')
+                            }
+                          />
+                        </label>
+                        <label className="field">
+                          <span>{tr('登录提示符（可选）', 'Login prompt (optional)')}</span>
+                          <input
+                            className="input"
+                            value={serialLoginPrompt}
+                            onChange={(event) => setSerialLoginPrompt(event.target.value)}
+                            placeholder="login:"
+                            spellCheck={false}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>{tr('密码提示符（可选）', 'Password prompt (optional)')}</span>
+                          <input
+                            className="input"
+                            value={serialLoginPasswordPrompt}
+                            onChange={(event) => setSerialLoginPasswordPrompt(event.target.value)}
+                            placeholder="Password:"
+                            spellCheck={false}
+                          />
+                        </label>
+                      </div>
+                      <label className="check-row">
+                        <input
+                          type="checkbox"
+                          checked={serialLoginSavePassword}
+                          onChange={(event) => setSerialLoginSavePassword(event.target.checked)}
+                        />
+                        {tr('保存密码（本机加密存储）', 'Save password (encrypted locally)')}
+                      </label>
+                      <div className="form-hint">
+                        {tr(
+                          '默认在输出末尾匹配 login:/username: 与 Password:（不区分大小写）；提示符留空即使用默认值。密码错误会重试两次后停止，连接后 120 秒内未出现提示则不再尝试。密码不会写入会话文件、日志、导出或 AI 观察。',
+                          'By default the end of the output is matched against login:/username: and Password: (case-insensitive); leave the prompts empty to use these defaults. A wrong password is retried twice; matching stops 120 s after connecting. The password is never written to the session file, logs, exports or AI access.'
+                        )}
+                      </div>
+                    </>
+                  ) : null}
+                </>
               ) : null}
               <div className="form-hint">
                 {connectionType === 'serial'

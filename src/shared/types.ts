@@ -107,6 +107,21 @@ export type SerialFlowControl = 'none' | 'rtscts' | 'xonxoff'
 export type SerialDataBits = 5 | 6 | 7 | 8
 export type SerialStopBits = 1 | 1.5 | 2
 
+/** Credentials sent when a serial console shows its login prompts. */
+export interface SerialLoginOptions {
+  enabled?: boolean
+  username: string
+  /**
+   * Typed password; transient and never written to sessions.json. With
+   * `savePassword` it is persisted encrypted in the credential store.
+   */
+  password?: string
+  savePassword?: boolean
+  /** Prompt markers; matched case-insensitively at the end of the output. */
+  loginPrompt?: string
+  passwordPrompt?: string
+}
+
 export interface SerialOptions {
   /** Device path, e.g. `/dev/ttyUSB0`, `/dev/cu.usbserial-1`, `COM3`. */
   path: string
@@ -118,6 +133,8 @@ export interface SerialOptions {
   /** Initial modem control line states. */
   dtr?: boolean
   rts?: boolean
+  /** Automatic console login after the port opens. */
+  login?: SerialLoginOptions
 }
 
 export interface SerialPortInfo {

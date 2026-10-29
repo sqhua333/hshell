@@ -63,6 +63,15 @@ export const ftpOptionsSchema = z.object({
   secure: z.boolean().optional()
 })
 
+export const serialLoginSchema = z.object({
+  enabled: z.boolean().optional(),
+  username: z.string().max(255),
+  password: z.string().max(4096).optional(),
+  savePassword: z.boolean().optional(),
+  loginPrompt: z.string().max(64).optional(),
+  passwordPrompt: z.string().max(64).optional()
+})
+
 export const serialOptionsSchema = z.object({
   path: z.string().min(1).max(255),
   baudRate: z.number().int().min(50).max(4_000_000),
@@ -71,7 +80,8 @@ export const serialOptionsSchema = z.object({
   parity: z.enum(['none', 'even', 'odd', 'mark', 'space']),
   flowControl: z.enum(['none', 'rtscts', 'xonxoff']),
   dtr: z.boolean().optional(),
-  rts: z.boolean().optional()
+  rts: z.boolean().optional(),
+  login: serialLoginSchema.optional()
 })
 
 export const sessionSchema = z.object({

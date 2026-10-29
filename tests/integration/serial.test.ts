@@ -194,6 +194,43 @@ describe.skipIf(!HAS_SOCAT)('serial connections', () => {
     manager.disconnect(RUNTIME)
   }, 20_000)
 
+  it('answers console login prompts without echoing the password', async () => {
+    const pair = await startSocatPair()
+    const peer = await openPort(pair.b)
+    cleanup.push(() => closePort(peer))
+    const peerData: Buffer[] = []
+    peer.on('data', (chunk: Buffer) => peerData.push(chunk))
+    const peerText = () => Buffer.concat(peerData).toString('utf8')
+
+    const { manager, events, statuses } = createManager()
+    await manager.connect({
+      runtimeId: RUNTIME,
+      session: {
+        ...SESSION,
+        serial: {
+          ...SERIAL,
+          path: pair.a,
+          login: { enabled: true, username: 'root', password: 'console-secret' }
+        }
+      },
+      cols: 80,
+      rows: 24
+    })
+    await waitFor(() => statuses.includes('connected'))
+
+    peer.write('Booting Linux...\r\nboard login: ')
+    await waitFor(() => peerText().includes('root\r'))
+    peer.write('Password: ')
+    await waitFor(() => peerText().includes('console-secret\r'))
+
+    // The device sees the password, but it must never come back through the
+    // terminal data path (which the AI tap and session log consume).
+    expect(dataReceived(events)).not.toContain('console-secret')
+    expect(events.some((event) => event.type === 'ssh:notice')).toBe(false)
+
+    manager.disconnect(RUNTIME)
+  }, 20_000)
+
   it('writes terminal output to a session log', async () => {
     const pair = await startSocatPair()
     const peer = await openPort(pair.b)

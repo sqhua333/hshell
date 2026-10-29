@@ -11,7 +11,12 @@ import {
   migrateSessions,
   normalizeFolders
 } from './storage/migrations'
-import { buildExportBundle, mergeSessions, type MergeOptions } from './storage/export-import'
+import {
+  buildExportBundle,
+  mergeSessions,
+  stripSessionPasswords,
+  type MergeOptions
+} from './storage/export-import'
 
 function seed(): SessionData {
   const now = Date.now()
@@ -162,10 +167,19 @@ export class AppStore {
       input.folderId && !this.folders.some((folder) => folder.id === input.folderId)
         ? null
         : input.folderId
+    // Console login passwords follow the SSH rule: never on disk. An empty
+    // password with savePassword means "keep the stored credential".
+    let serial = input.serial
+    if (serial?.login) {
+      const login = { ...serial.login }
+      delete login.password
+      serial = { ...serial, login: login.enabled ? login : undefined }
+    }
     const session: Session = {
       ...input,
       auth,
       jumpHosts,
+      serial,
       folderId,
       proxyJump: input.proxyJump ?? null,
       createdAt: existing?.createdAt ?? input.createdAt ?? now,
@@ -228,9 +242,15 @@ export class AppStore {
     skipped: number
   } {
     this.assertWritable()
+    // The bundle is user-supplied JSON; merge it only after the same secret
+    // stripping the export path applies.
+    const sanitized: ExportBundle = {
+      ...bundle,
+      sessions: bundle.sessions.map((session) => stripSessionPasswords(session as Session))
+    }
     const merged = mergeSessions(
       { folders: this.folders, sessions: this.sessions },
-      bundle,
+      sanitized,
       options
     )
     this.folders = merged.data.folders

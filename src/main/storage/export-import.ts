@@ -43,7 +43,12 @@ function defaultIdFactory(prefix: string): string {
   return `${prefix}-${randomUUID().slice(0, 8)}`
 }
 
-function stripPassword(session: Session): ExportBundle['sessions'][number] {
+/**
+ * Drop every password a session may carry: the SSH login, the jump hosts and
+ * the serial console login. Exports and imports both go through here, so a
+ * file edited by hand cannot smuggle a password onto disk.
+ */
+export function stripSessionPasswords(session: Session): ExportBundle['sessions'][number] {
   const auth = { ...session.auth }
   delete auth.password
   const jumpHosts = session.jumpHosts?.map((jump) => {
@@ -52,10 +57,17 @@ function stripPassword(session: Session): ExportBundle['sessions'][number] {
     delete jumpAuth.password
     return { ...jump, auth: jumpAuth }
   })
+  let serial = session.serial
+  if (serial?.login) {
+    const login = { ...serial.login }
+    delete login.password
+    serial = { ...serial, login: login.enabled ? login : undefined }
+  }
   return {
     ...session,
     auth,
     ...(jumpHosts ? { jumpHosts } : {}),
+    ...(serial ? { serial } : {}),
     proxyJump: session.proxyJump ?? null
   }
 }
@@ -150,7 +162,7 @@ export function buildExportBundle(
     exportedAt: Date.now(),
     app: { name: options.appName, version: options.appVersion },
     folders: data.folders.map((folder) => ({ ...folder })),
-    sessions: data.sessions.map(stripPassword),
+    sessions: data.sessions.map(stripSessionPasswords),
     ...(keys.length > 0 ? { keys } : {})
   }
 

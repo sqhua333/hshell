@@ -12,6 +12,7 @@ import {
   serializeBundle
 } from '../../src/main/storage/export-import'
 import {
+  STORAGE_SCHEMA_VERSION,
   findFolderCycles,
   migrateSessions,
   normalizeFolders
@@ -58,6 +59,33 @@ describe('migrations', () => {
     expect(sessions).toHaveLength(1)
     expect(sessions[0].auth.password).toBeUndefined()
     expect(sessions[0].proxyJump).toBeNull()
+  })
+
+  it('strips serial console login passwords when loading', () => {
+    const [session] = migrateSessions(
+      [
+        {
+          ...makeSession({ id: 's-serial', connectionType: 'serial' }),
+          serial: {
+            path: 'COM3',
+            baudRate: 115200,
+            dataBits: 8,
+            stopBits: 1,
+            parity: 'none',
+            flowControl: 'none',
+            login: {
+              enabled: true,
+              username: 'root',
+              password: 'console-secret',
+              savePassword: true
+            }
+          }
+        }
+      ],
+      STORAGE_SCHEMA_VERSION
+    )
+    expect(session?.serial?.login?.password).toBeUndefined()
+    expect(session?.serial?.login?.username).toBe('root')
   })
 
   it('strips jump host passwords when loading', () => {
@@ -160,6 +188,36 @@ describe('export / import', () => {
       port: 2222,
       username: 'jumper'
     })
+  })
+
+  it('omits serial console login passwords from exports', () => {
+    const session = makeSession({
+      id: 's-serial-export',
+      connectionType: 'serial',
+      serial: {
+        path: '/dev/ttyUSB0',
+        baudRate: 115200,
+        dataBits: 8,
+        stopBits: 1,
+        parity: 'none',
+        flowControl: 'none',
+        login: {
+          enabled: true,
+          username: 'root',
+          password: 'console-secret',
+          savePassword: true
+        }
+      }
+    })
+
+    const { bundle } = buildExportBundle(
+      { folders: [], sessions: [session] },
+      { appName: 'HShell', appVersion: '1.0.0' }
+    )
+    const text = serializeBundle(bundle)
+    expect(text).not.toContain('console-secret')
+    expect(bundle.sessions[0].serial?.login).toMatchObject({ enabled: true, username: 'root' })
+    expect(bundle.sessions[0].serial?.login?.password).toBeUndefined()
   })
 
   it('remaps colliding ids and can skip duplicate endpoints', () => {
@@ -339,6 +397,82 @@ describe('AppStore persistence', () => {
       savePassword: true
     })
     expect(session?.jumpHosts?.[0].auth?.password).toBeUndefined()
+  })
+
+  it('never writes serial console login passwords to disk', () => {
+    const dir = tempDir('hshell-store-serial-')
+    const store = new AppStore(dir)
+    store.saveSession(
+      makeSession({
+        id: 's-serial',
+        connectionType: 'serial',
+        serial: {
+          path: '/dev/ttyUSB0',
+          baudRate: 115200,
+          dataBits: 8,
+          stopBits: 1,
+          parity: 'none',
+          flowControl: 'none',
+          login: {
+            enabled: true,
+            username: 'root',
+            password: 'console-secret',
+            savePassword: true,
+            loginPrompt: 'login:'
+          }
+        }
+      })
+    )
+
+    const raw = readFileSync(join(dir, 'sessions.json'), 'utf8')
+    expect(raw).not.toContain('console-secret')
+    const session = new AppStore(dir).list().sessions.find((item) => item.id === 's-serial')
+    expect(session?.serial?.login).toMatchObject({
+      enabled: true,
+      username: 'root',
+      savePassword: true,
+      loginPrompt: 'login:'
+    })
+    expect(session?.serial?.login?.password).toBeUndefined()
+  })
+
+  it('never persists serial login passwords smuggled into an import bundle', () => {
+    const dir = tempDir('hshell-import-serial-')
+    const store = new AppStore(dir)
+    const session = makeSession({
+      id: 's-serial-import',
+      connectionType: 'serial',
+      serial: {
+        path: '/dev/ttyUSB0',
+        baudRate: 115200,
+        dataBits: 8,
+        stopBits: 1,
+        parity: 'none',
+        flowControl: 'none',
+        login: { enabled: true, username: 'root', savePassword: true }
+      }
+    })
+    const bundle = buildExportBundle(
+      { folders: [], sessions: [session] },
+      { appName: 'HShell', appVersion: '1.0.0' }
+    ).bundle
+    // A hand-edited file can put anything back; the store must strip it.
+    const crafted = {
+      ...bundle,
+      sessions: bundle.sessions.map((item) => ({
+        ...item,
+        serial: { ...item.serial!, login: { ...item.serial!.login!, password: 'smuggled-secret' } }
+      }))
+    }
+
+    store.importBundle(crafted)
+    const raw = readFileSync(join(dir, 'sessions.json'), 'utf8')
+    expect(raw).not.toContain('smuggled-secret')
+    const stored = new AppStore(dir)
+      .list()
+      .sessions.find((item) => item.id === 's-serial-import')
+    expect(stored?.serial?.login?.username).toBe('root')
+    expect(stored?.serial?.login?.password).toBeUndefined()
   })
 
   it('migrates v1 files and rejects folder cycles', () => {

@@ -8,6 +8,7 @@ import type {
 } from '@shared/types'
 import { resolveLogDirectory, SessionLogger } from '../storage/session-log'
 import { ZmodemController, type ZmodemHost } from '../ssh/zmodem'
+import { SerialAutoLogin } from './auto-login'
 
 interface Runtime {
   runtimeId: string
@@ -23,6 +24,8 @@ interface Runtime {
   flushTimer: NodeJS.Timeout | null
   zmodem: ZmodemController | null
   log: SessionLogger | null
+  /** Console login watcher, if the session enables it. */
+  login: SerialAutoLogin | null
 }
 
 const noopZmodemHost: ZmodemHost = {
@@ -65,6 +68,19 @@ export function normalizeSerialOptions(input: SerialOptions | undefined): Serial
     dtr: typeof input.dtr === 'boolean' ? input.dtr : undefined,
     rts: typeof input.rts === 'boolean' ? input.rts : undefined
   }
+}
+
+/** Build the login watcher from the session, or null when it is off. */
+function createLogin(session: Session): SerialAutoLogin | null {
+  const config = session.serial?.login
+  const username = config?.username?.trim()
+  if (!config?.enabled || !username) return null
+  return new SerialAutoLogin({
+    username,
+    password: config.password,
+    loginPrompt: config.loginPrompt,
+    passwordPrompt: config.passwordPrompt
+  })
 }
 
 function friendlyError(error: Error, path: string): string {
@@ -144,7 +160,8 @@ export class SerialManager {
       bufferBytes: 0,
       flushTimer: null,
       zmodem: null,
-      log: null
+      log: null,
+      login: createLogin(req.session)
     }
     this.runtimes.set(rt.runtimeId, rt)
 
@@ -178,6 +195,7 @@ export class SerialManager {
       if (rt.zmodem) rt.zmodem.feed(chunk)
       else {
         rt.log?.write(chunk)
+        this.feedAutoLogin(rt, chunk)
         this.pushData(rt, chunk)
       }
     })
@@ -233,6 +251,9 @@ export class SerialManager {
         writeTerminal: (data) => {
           const output = Buffer.from(data)
           rt.log?.write(output)
+          // Console output normally travels through the ZMODEM detector, so
+          // the login engine watches here as well as on the direct path.
+          this.feedAutoLogin(rt, output)
           this.pushData(rt, output)
         },
         status: (update) => {
@@ -261,6 +282,29 @@ export class SerialManager {
         })
       })
     }
+  }
+
+  /**
+   * Answer the console's login prompts. Writes go straight to the port, so
+   * they never reach the AI tap or the session log; the password is only ever
+   * the value resolved from the encrypted credential store.
+   */
+  private feedAutoLogin(rt: Runtime, chunk: Buffer): void {
+    const login = rt.login
+    if (!login) return
+    for (const event of login.feed(chunk.toString('utf8'))) {
+      if (event.send !== undefined) this.write(rt.runtimeId, `${event.send}\r`)
+      if (event.notice) {
+        this.emit({
+          type: 'ssh:notice',
+          runtimeId: rt.runtimeId,
+          level: event.notice.level,
+          message: event.notice.message
+        })
+      }
+      if (event.done) rt.login = null
+    }
+    if (login.finished) rt.login = null
   }
 
   /** Serial links have no window size; the call keeps the API uniform. */

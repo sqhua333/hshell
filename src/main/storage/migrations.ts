@@ -85,6 +85,15 @@ export function migrateSessions(raw: unknown, fromVersion: number): Session[] {
         : {}
     delete auth.password
     source.auth = auth
+    if (source.serial && typeof source.serial === 'object') {
+      const serial = { ...(source.serial as Record<string, unknown>) }
+      if (serial.login && typeof serial.login === 'object') {
+        const login = { ...(serial.login as Record<string, unknown>) }
+        delete login.password
+        serial.login = login
+      }
+      source.serial = serial
+    }
     if (Array.isArray(source.jumpHosts)) {
       source.jumpHosts = source.jumpHosts.map((entry) => {
         if (!entry || typeof entry !== 'object') return entry

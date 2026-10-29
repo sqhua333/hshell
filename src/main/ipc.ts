@@ -56,6 +56,7 @@ import { readUiTheme, writeUiTheme } from './theme-prefs'
 import {
   attachStoredCredentials,
   jumpCredentialId,
+  serialLoginCredentialId,
   sessionCredentialId
 } from './storage/session-credentials'
 
@@ -341,6 +342,16 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     } else if (!parsed.auth.savePassword) {
       credentials.remove(sessionCredentialId(saved.id))
     }
+    // Serial console login follows the same rule: only an opt-in, encrypted
+    // copy is kept; an empty password leaves the stored one untouched.
+    const serialLogin = parsed.serial?.login
+    if (serialLogin?.enabled && serialLogin.savePassword) {
+      if (serialLogin.password) {
+        credentials.put(serialLoginCredentialId(saved.id), serialLogin.password)
+      }
+    } else {
+      credentials.remove(serialLoginCredentialId(saved.id))
+    }
 
     const keptJumpIds = new Set<string>()
     for (const jump of parsed.jumpHosts ?? []) {
@@ -363,6 +374,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     const previous = store.findSession(sessionId)
     store.removeSession(sessionId)
     credentials.remove(sessionCredentialId(sessionId))
+    credentials.remove(serialLoginCredentialId(sessionId))
     for (const jump of previous?.jumpHosts ?? []) {
       credentials.remove(jumpCredentialId(sessionId, jump.id))
     }
@@ -489,7 +501,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
       sessionTap.register(parsed.runtimeId, parsed.session)
     }
     if (parsed.session.connectionType === 'serial') {
-      await serial.connect(parsed)
+      await serial.connect({ ...parsed, session: attachStoredCredentials(parsed.session, credentials) })
       return
     }
     if (parsed.session.connectionType === 'local') {
