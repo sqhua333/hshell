@@ -375,6 +375,22 @@ try {
   if (!(await waitWritable(false))) fail('Ctrl+Alt+I did not revoke AI input')
   console.log('AI_INPUT_SHORTCUT_OK')
 
+  // 3c. The status bar's AI input button toggles the same grant.
+  const clickAiInput = () =>
+    evaluate(
+      ui(`
+        const button = document.querySelector('.status-ai-input')
+        if (!button) throw new Error('AI input button missing')
+        button.click()
+        return true
+      `)
+    )
+  await clickAiInput()
+  if (!(await waitWritable(true))) fail('AI input button did not allow input')
+  await clickAiInput()
+  if (!(await waitWritable(false))) fail('AI input button did not revoke input')
+  console.log('AI_INPUT_BUTTON_OK')
+
   // 4. Revoking watch while a prompt is open cancels it and blocks the write.
   await evaluate(
     ui(`

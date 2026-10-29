@@ -47,6 +47,7 @@ export function StatusBar(): ReactElement {
     state.activeRuntimeId ? state.aiInputModes[state.activeRuntimeId] : undefined
   )
   const setAiWatch = useApp((state) => state.setAiWatch)
+  const setAiInputMode = useApp((state) => state.setAiInputMode)
   const addToast = useApp((state) => state.addToast)
   const [clock, setClock] = useState(Date.now())
 
@@ -102,6 +103,32 @@ export function StatusBar(): ReactElement {
   // them with the AI tap.
   const aiCapable = !!session && session.connectionType !== 'ftp' && current !== 'idle'
   const aiInputKey = api.app.platform === 'darwin' ? 'Cmd+Alt+I' : 'Ctrl+Alt+I'
+  const toggleAiInput = async (): Promise<void> => {
+    if (!activeRuntimeId) return
+    try {
+      if (aiMode) {
+        await setAiInputMode(activeRuntimeId, 'off')
+        addToast('info', tr('已禁止 AI 向该会话输入', 'AI input disabled for this session'), 2500)
+      } else {
+        await setAiInputMode(activeRuntimeId, 'manual')
+        addToast(
+          'info',
+          aiWatched
+            ? tr(
+                '已允许 AI 输入；每次写入仍需你确认',
+                'AI may now request input; each write still needs your approval'
+              )
+            : tr(
+                '已开始观察并允许 AI 输入；每次写入仍需你确认',
+                'Watching started and AI input allowed; each write still needs your approval'
+              ),
+          3000
+        )
+      }
+    } catch (err) {
+      addToast('error', (err as Error).message)
+    }
+  }
   const toggleAiWatch = async (): Promise<void> => {
     if (!activeRuntimeId) return
     try {
@@ -132,37 +159,59 @@ export function StatusBar(): ReactElement {
       </div>
       <div className="status-spacer" />
       {aiCapable && activeRuntimeId ? (
-        <button
-          className={`status-section status-ai${aiWatched ? ' active' : ''}${
-            aiMode === 'auto' ? ' auto' : ''
-          }`}
-          title={
-            (aiWatched
-              ? tr('停止向 AI 公开该会话', 'Stop exposing this session to AI')
-              : tr('允许 AI 只读观察该会话', 'Let AI read this session (read-only)')) +
-            '\n' +
-            tr(
-              `${aiInputKey}：允许 / 禁止 AI 输入（逐条确认）`,
-              `${aiInputKey}: allow / disable AI input (each write is confirmed)`
-            ) +
-            (aiMode === 'auto'
-              ? '\n' +
-                tr(
-                  '当前为自动输入：AI 写入会直接发送，不再逐条确认',
-                  'Auto input is on: AI writes are sent without asking each time'
-                )
-              : '')
-          }
-          onClick={() => void toggleAiWatch()}
-        >
-          <Icon name="eye" size={12} />
-          {tr('AI 观察', 'AI watch')}
-          {aiMode ? (
-            <span className="status-ai-mode">
-              {aiMode === 'auto' ? tr('自动输入', 'auto') : tr('可输入', 'input')}
-            </span>
-          ) : null}
-        </button>
+        <>
+          <button
+            className={`status-section status-ai${aiWatched ? ' active' : ''}`}
+            title={
+              aiWatched
+                ? tr('停止向 AI 公开该会话', 'Stop exposing this session to AI')
+                : tr('允许 AI 只读观察该会话', 'Let AI read this session (read-only)')
+            }
+            onClick={() => void toggleAiWatch()}
+          >
+            <Icon name="eye" size={12} />
+            {tr('AI 观察', 'AI watch')}
+          </button>
+          <button
+            className={`status-section status-ai status-ai-input${aiMode ? ' active' : ''}${
+              aiMode === 'auto' ? ' auto' : ''
+            }`}
+            title={
+              (aiMode
+                ? tr('禁止 AI 向该会话输入', 'Disable AI input for this session')
+                : tr(
+                    '允许 AI 向该会话输入，每次写入需你确认',
+                    'Allow AI input for this session; each write needs your approval'
+                  )) +
+              '\n' +
+              tr(
+                `${aiInputKey}：快捷切换（开启后仍需逐条确认）`,
+                `${aiInputKey}: shortcut toggle (writes are still confirmed)`
+              ) +
+              (aiMode === 'auto'
+                ? '\n' +
+                  tr(
+                    '当前为自动输入：AI 写入会直接发送，不再逐条确认',
+                    'Auto input is on: AI writes are sent without asking each time'
+                  )
+                : '') +
+              '\n' +
+              tr(
+                '自动输入只能在 AI 访问对话框中开启',
+                'Auto input can only be enabled in the AI access dialog'
+              )
+            }
+            onClick={() => void toggleAiInput()}
+          >
+            <Icon name="key" size={12} />
+            {tr('AI 输入', 'AI input')}
+            {aiMode ? (
+              <span className="status-ai-mode">
+                {aiMode === 'auto' ? tr('自动', 'auto') : tr('需确认', 'confirm')}
+              </span>
+            ) : null}
+          </button>
+        </>
       ) : null}
       {recordingLabel ? (
         <div
