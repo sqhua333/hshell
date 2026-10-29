@@ -448,7 +448,8 @@ export async function startAiMcpServer(
     // 0.0.0.0 is not a connectable address; show the first NIC instead.
     url: `http://${displayHost(bound.host)}:${bound.port}/mcp`,
     token,
-    host: bound.host
+    host: bound.host,
+    port: bound.port
   }
   try {
     mkdirSync(userData, { recursive: true })

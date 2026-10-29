@@ -462,6 +462,8 @@ export interface AiMcpInfo {
   token: string
   /** Address the server actually bound to (`127.0.0.1`, `0.0.0.0` or a NIC address). */
   host: string
+  /** Port the server actually bound, reused across launches. */
+  port: number
 }
 
 /** A non-loopback IPv4 address the MCP server can listen on for VM/LAN clients. */

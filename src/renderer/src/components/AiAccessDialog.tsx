@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactElement } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react'
 import type {
   AiBindAddress,
   AiMcpInfo,
@@ -7,6 +7,16 @@ import type {
 } from '@shared/types'
 import { api } from '../api'
 import { formatBytes } from '../lib/format'
+import {
+  ANY_HOST,
+  ENDPOINT_HOST_STORAGE_KEY,
+  LOOPBACK,
+  endpointHosts,
+  endpointUrl,
+  initialEndpointHost,
+  isPlausibleHost,
+  normalizeEndpointHost
+} from '../lib/mcp-endpoint'
 import { tr } from '../lib/i18n'
 import { useApp } from '../store'
 import { Icon } from './Icon'
@@ -52,6 +62,11 @@ function AiAccessDialogInner(): ReactElement {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [copied, setCopied] = useState('')
+  // Client-side host, independent of the listen address: the same binding can
+  // be reached through loopback, a NIC, or a NAT/port-forward entry.
+  const [endpointHost, setEndpointHost] = useState(LOOPBACK)
+  const [endpointCustom, setEndpointCustom] = useState('')
+  const [endpointReady, setEndpointReady] = useState(false)
 
   const loadSessions = useCallback(async (): Promise<void> => {
     setSessions(await api.ai.sessions())
@@ -85,6 +100,37 @@ function AiAccessDialogInner(): ReactElement {
   useEffect(() => {
     if (info) setSelectedHost(info.host)
   }, [info])
+
+  // Remember which address the client uses (e.g. the VM's NAT gateway) so the
+  // copied command stays stable across dialog opens and restarts.
+  useEffect(() => {
+    if (!info) {
+      setEndpointReady(false)
+      return
+    }
+    let saved: string | null = null
+    try {
+      saved = window.localStorage.getItem(ENDPOINT_HOST_STORAGE_KEY)
+    } catch {
+      /* storage may be unavailable; fall back to the default host */
+    }
+    const initial = initialEndpointHost(info, bindings, saved)
+    setEndpointHost(initial.host)
+    setEndpointCustom(initial.custom)
+    setEndpointReady(true)
+  }, [info, bindings])
+
+  useEffect(() => {
+    if (!endpointReady) return
+    const host =
+      endpointHost === 'custom' ? normalizeEndpointHost(endpointCustom) : endpointHost
+    if (!host || !isPlausibleHost(host)) return
+    try {
+      window.localStorage.setItem(ENDPOINT_HOST_STORAGE_KEY, host)
+    } catch {
+      /* storage may be unavailable; the current session still works */
+    }
+  }, [endpointReady, endpointHost, endpointCustom])
 
   // Keep the byte counts and status dots current while the dialog is open.
   useEffect(() => {
@@ -159,9 +205,35 @@ function AiAccessDialogInner(): ReactElement {
     }
   }
 
-  const command = info
-    ? `claude mcp add --transport http hshell ${info.url} --header "Authorization: Bearer ${info.token}"`
-    : ''
+  const allowedHosts = useMemo(
+    () => (info ? endpointHosts(info, bindings) : []),
+    [info, bindings]
+  )
+  const allowCustom = info?.host === ANY_HOST
+  const chosenHost =
+    endpointHost === 'custom' ? normalizeEndpointHost(endpointCustom) : endpointHost
+  const endpointValid = isPlausibleHost(chosenHost)
+  const endpoint = !info
+    ? ''
+    : endpointValid
+      ? endpointUrl(info, chosenHost)
+      : `http://${chosenHost || '…'}:${info.port}/mcp`
+  const command =
+    info && endpointValid
+      ? `claude mcp add --transport http hshell ${endpoint} --header "Authorization: Bearer ${info.token}"`
+      : ''
+  const endpointOptions = [
+    ...allowedHosts.map((host) => {
+      if (host === LOOPBACK) {
+        return { value: host, label: tr('本机回环 · 127.0.0.1', 'Loopback · 127.0.0.1') }
+      }
+      const binding = bindings.find((item) => item.address === host)
+      return { value: host, label: binding ? `${binding.name} · ${host}` : host }
+    }),
+    ...(allowCustom
+      ? [{ value: 'custom', label: tr('自定义地址…', 'Custom address…') }]
+      : [])
+  ]
   const exposed = !!info && info.host !== '127.0.0.1'
   const bindOptions = [
     {
@@ -281,30 +353,73 @@ function AiAccessDialogInner(): ReactElement {
 
       {info ? (
         <>
-          <label className="field">
+          {endpointOptions.length > 1 ? (
+            <div className="field ai-endpoint-field">
+              <span>{tr('客户端访问地址', 'Client address')}</span>
+              <div className="ai-host-row">
+                <select
+                  value={endpointHost}
+                  onChange={(event) => {
+                    const value = event.target.value
+                    setEndpointHost(value)
+                    if (value !== 'custom') {
+                      setEndpointCustom('')
+                      try {
+                        window.localStorage.setItem(ENDPOINT_HOST_STORAGE_KEY, value)
+                      } catch {
+                        /* storage may be unavailable; the current session still works */
+                      }
+                    }
+                  }}
+                >
+                  {endpointOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                {endpointHost === 'custom' ? (
+                  <input
+                    value={endpointCustom}
+                    onChange={(event) => setEndpointCustom(event.target.value)}
+                    placeholder={tr('10.0.2.2 或域名', '10.0.2.2 or hostname')}
+                    spellCheck={false}
+                  />
+                ) : null}
+              </div>
+              <p className="form-hint">
+                {tr(
+                  '只决定复制给客户端的地址，不会重启 MCP 服务。客户端与 HShell 同机时用本机回环；虚拟机访问宿主机时选宿主机的虚拟网卡（如 VMware VMnet8、VirtualBox Host-Only）；端口转发、VirtualBox NAT（10.0.2.2）或域名请选「自定义地址」。',
+                  'Only changes the address copied for clients; the server is not restarted. Use loopback when the client runs on the same machine; pick the host’s virtual adapter (VMware VMnet8, VirtualBox Host-Only) for a VM; choose a custom address for port forwarding, VirtualBox NAT (10.0.2.2) or a hostname.'
+                )}
+              </p>
+            </div>
+          ) : null}
+
+          <label className="field ai-endpoint-field">
             <span>{tr('MCP 地址', 'MCP endpoint')}</span>
             <div className="ai-code-row">
-              <code className="ai-code">{info.url}</code>
+              <code className="ai-code">{endpoint}</code>
               <button
                 className="icon-btn"
                 title={tr('复制地址', 'Copy URL')}
-                onClick={() => void copy('url', info.url)}
+                disabled={!endpointValid}
+                onClick={() => void copy('url', endpoint)}
               >
                 <Icon name={copied === 'url' ? 'check' : 'copy'} size={14} />
               </button>
             </div>
+            {!endpointValid ? (
+              <div className="form-error">
+                {tr(
+                  '访问地址格式不正确，请填写主机名或 IP。',
+                  'Invalid client address; enter a hostname or IP.'
+                )}
+              </div>
+            ) : null}
           </label>
 
-          {info.host === '0.0.0.0' ? (
-            <p className="form-hint ai-warning">
-              {tr(
-                '当前监听所有网卡；上面的地址用第一个网卡 IP 显示。虚拟机请按网络模式换成实际入口（VirtualBox NAT 为 10.0.2.2）。',
-                'Listening on all interfaces; the address above uses the first NIC IP. In the VM, use the actual entry for your network (10.0.2.2 for VirtualBox NAT).'
-              )}
-            </p>
-          ) : null}
-
-          <label className="field">
+          <label className="field ai-endpoint-field">
             <span>{tr('访问令牌', 'Access token')}</span>
             <div className="ai-code-row">
               <code className="ai-code ai-token">{info.token}</code>
@@ -318,13 +433,17 @@ function AiAccessDialogInner(): ReactElement {
             </div>
           </label>
 
-          <div className="field">
+          <div className="field ai-endpoint-field">
             <span>{tr('注册到 Claude Code', 'Register with Claude Code')}</span>
             <div className="ai-code-row ai-command">
-              <pre className="ai-code">{command}</pre>
+              <pre className="ai-code">
+                {command ||
+                  tr('请先填写有效的访问地址。', 'Enter a valid client address first.')}
+              </pre>
               <button
                 className="icon-btn"
                 title={tr('复制命令', 'Copy command')}
+                disabled={!endpointValid}
                 onClick={() => void copy('command', command)}
               >
                 <Icon name={copied === 'command' ? 'check' : 'copy'} size={14} />

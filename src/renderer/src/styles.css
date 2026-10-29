@@ -2861,6 +2861,10 @@ body.resizing-sidebar {
   word-break: break-all;
 }
 
+.ai-endpoint-field {
+  margin-top: 14px;
+}
+
 .ai-command .ai-code {
   max-height: 88px;
 }
@@ -3019,7 +3023,8 @@ body.resizing-sidebar {
   gap: 8px;
 }
 
-.ai-host-row select {
+.ai-host-row select,
+.ai-host-row input {
   flex: 1;
   min-width: 0;
 }
