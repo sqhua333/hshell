@@ -7,6 +7,7 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import type { Session, TriggerRule } from '@shared/types'
 import { isLocalSession, isSerialSession, isTelnetSession, sessionTarget } from '@shared/session'
 import { api } from '../api'
+import { aiEchoProbe, findAiEchoMatch, squashWhitespace } from '../lib/ai-echo'
 import { resolveColorScheme } from '../lib/color-schemes'
 import { tr } from '../lib/i18n'
 import { matchShortcut } from '../lib/shortcuts'
@@ -51,6 +52,8 @@ const AI_ECHO_RETRY_LIMIT = 15
 /** Stop chasing repaints this long after the echo; the line is final by then. */
 const AI_ECHO_RETRY_WINDOW_MS = 3_000
 const AI_TINT = { dark: '#8b5cf6', light: '#7c3aed' } as const
+/** Strong enough to read as a marked line, not a faint selection. */
+const AI_TINT_ALPHA = { dark: 0.46, light: 0.22 } as const
 
 type Schedule = (callback: () => void, delay?: number) => void
 
@@ -61,7 +64,7 @@ interface PendingAiEcho {
 
 /** Decoration(s) marking one echoed AI input while the shell may repaint it. */
 interface AiEchoAnchor {
-  needle: string
+  probe: string
   extraLines: number
   expectedLine: number
   background: string
@@ -90,8 +93,8 @@ function aiEchoBackground(session: Session): string {
   const background = scheme.theme.background ?? (scheme.dark ? '#000000' : '#ffffff')
   const base = parseHex(background)
   const tint = parseHex(scheme.dark ? AI_TINT.dark : AI_TINT.light)
-  if (!base || !tint) return scheme.dark ? '#2a2140' : '#efe7fd'
-  const alpha = scheme.dark ? 0.24 : 0.14
+  if (!base || !tint) return scheme.dark ? '#48347d' : '#e3d4fb'
+  const alpha = scheme.dark ? AI_TINT_ALPHA.dark : AI_TINT_ALPHA.light
   const mixed = tint.map((value, index) =>
     Math.round(base[index] + (value - base[index]) * alpha)
   )
@@ -124,17 +127,32 @@ function aiEchoDecoration(
   }
 }
 
-/** The expected line after a repaint, or the nearest line with the same text. */
-function locateAiEchoLine(term: Terminal, expected: number, needle: string): number | null {
+/** A long command can wrap over many rows; the cursor sits on its last one. */
+const AI_ECHO_LOOKBACK_ROWS = 64
+
+/**
+ * The expected line after a repaint, or the nearest line with the same text.
+ * A console that starts the echo with a soft line break leaves only part of
+ * the probe on the first row, so shorter prefixes are tried as well.
+ */
+function locateAiEchoLine(term: Terminal, expected: number, probe: string): number | null {
   const buffer = term.buffer.active
-  const first = needle.split('\n')[0]
-  if (!first) return null
-  for (let delta = 0; delta <= 3; delta += 1) {
-    const candidates = delta === 0 ? [expected] : [expected + delta, expected - delta]
-    for (const candidate of candidates) {
-      if (candidate < 0 || candidate >= buffer.length) continue
-      const text = buffer.getLine(candidate)?.translateToString(true) ?? ''
-      if (text.includes(first)) return candidate
+  if (!probe) return null
+  for (const length of [12, 8, 6, 4]) {
+    if (length > probe.length) continue
+    const needle = probe.slice(0, length)
+    for (let delta = 0; delta <= AI_ECHO_LOOKBACK_ROWS; delta += 1) {
+      const candidates =
+        delta === 0
+          ? [expected]
+          : delta <= 3
+            ? [expected - delta, expected + delta]
+            : [expected - delta]
+      for (const candidate of candidates) {
+        if (candidate < 0 || candidate >= buffer.length) continue
+        const text = buffer.getLine(candidate)?.translateToString(true) ?? ''
+        if (squashWhitespace(text).includes(needle)) return candidate
+      }
     }
   }
   return null
@@ -163,7 +181,7 @@ function releaseAiEcho(anchor: AiEchoAnchor): void {
 function anchorAiEcho(term: Terminal, anchor: AiEchoAnchor, schedule: Schedule): void {
   if (anchor.stopped) return
   clearAiEchoEntries(anchor)
-  const line = locateAiEchoLine(term, anchor.expectedLine, anchor.needle)
+  const line = locateAiEchoLine(term, anchor.expectedLine, anchor.probe)
   if (line === null) {
     retryAiEcho(term, anchor, schedule)
     return
@@ -171,7 +189,17 @@ function anchorAiEcho(term: Terminal, anchor: AiEchoAnchor, schedule: Schedule):
   anchor.expectedLine = line
   const buffer = term.buffer.active
   const cursorLine = buffer.baseY + buffer.cursorY
-  for (let index = 0; index <= anchor.extraLines; index += 1) {
+  // A long command wraps without emitting a newline; keep following the
+  // wrapped rows so the whole echo is tinted, not just its first row.
+  let lastLine = line + anchor.extraLines
+  while (
+    lastLine + 1 < buffer.length &&
+    lastLine - line < 200 &&
+    buffer.getLine(lastLine + 1)?.isWrapped
+  ) {
+    lastLine += 1
+  }
+  for (let index = 0; index <= lastLine - line; index += 1) {
     const lineFromEnd = cursorLine - (line + index)
     if (lineFromEnd < 0) continue
     const entry = aiEchoDecoration(term, lineFromEnd, anchor.background)
@@ -229,16 +257,20 @@ function applyAiInputEcho(
       continue
     }
     // A repainting line editor can echo the text twice; the later occurrence
-    // is the one that ends up on screen with the prompt.
-    const at = clean.lastIndexOf(needle)
-    if (at < 0) continue
+    // is the one that ends up on screen with the prompt. Serial consoles can
+    // reflow the echo, so the match tolerates inserted whitespace.
+    const hit = findAiEchoMatch(clean, needle)
+    if (!hit) continue
     pending.splice(index, 1)
-    const startFromEnd = (clean.slice(at).match(/\n/g) ?? []).length
+    const newlineCount = (value: string): number => (value.match(/\n/g) ?? []).length
     const buffer = term.buffer.active
+    const cursorLine = buffer.baseY + buffer.cursorY
+    const startLine = cursorLine - newlineCount(clean.slice(hit.start))
+    const endLine = cursorLine - newlineCount(clean.slice(hit.end))
     const anchor: AiEchoAnchor = {
-      needle,
-      extraLines: (needle.match(/\n/g) ?? []).length,
-      expectedLine: buffer.baseY + buffer.cursorY - startFromEnd,
+      probe: aiEchoProbe(needle),
+      extraLines: Math.max(0, endLine - startLine),
+      expectedLine: startLine,
       background: aiEchoBackground(session),
       expiresAt: now + AI_ECHO_RETRY_WINDOW_MS,
       attempts: 0,
@@ -864,13 +896,21 @@ export function TerminalPane({
       }}
       onContextMenu={(event) => {
         event.preventDefault()
-        // Right click pastes, like most terminal emulators. Shift+right click
-        // still opens the actions menu (copy, select all, find, clear).
-        if (!event.shiftKey) {
-          void useApp.getState().pasteClipboard(runtimeId)
+        // Shift+right click opens the actions menu (copy, select all, find,
+        // clear). Otherwise follow the usual terminal convention: a selection
+        // copies (and is cleared), a plain right click on the active terminal
+        // pastes.
+        if (event.shiftKey) {
+          setMenu({ x: event.clientX, y: event.clientY })
           return
         }
-        setMenu({ x: event.clientX, y: event.clientY })
+        const term = terminalRef.current
+        if (term?.hasSelection()) {
+          void useApp.getState().copySelection(runtimeId)
+          return
+        }
+        term?.focus()
+        void useApp.getState().pasteClipboard(runtimeId)
       }}
     >
       {showTimestamps ? (

@@ -3,7 +3,8 @@
  * E2E for terminal copy/paste (headless Electron + CDP).
  *
  *  1. Shift+right-click opens the menu; Copy is disabled without a selection.
- *  2. Plain right-click pastes the clipboard into the shell without a menu.
+ *  2. Plain right-click pastes the clipboard into the shell without a menu;
+ *     with a selection it copies instead and clears the selection.
  *  3. Ctrl+C with a selection copies without sending 0x03 to the shell;
  *     Ctrl+C without a selection sends SIGINT.
  *  4. Ctrl+V on multi-line text asks for confirmation and sends nothing until
@@ -322,6 +323,32 @@ try {
   if (rightClickPaste.menuOpen) fail('plain right-click opened the menu', rightClickPaste)
   await waitForReceived('right-click-paste-42', 'right-click paste')
   console.log('RIGHT_CLICK_PASTE_OK')
+
+  // 2b. With a selection, plain right-click copies instead of pasting.
+  const rightClickCopy = await evaluate(
+    ui(`
+      const sentinel = 'right-click-copy-sentinel-77'
+      await window.hshell.clipboard.writeText(sentinel)
+      await selectAll()
+      contextMenu(80, 80)
+      await waitFor(() => !hasSelection(), 'selection cleared after right-click copy')
+      const clipboard = await window.hshell.clipboard.readText()
+      return {
+        menuOpen: Boolean(document.querySelector('.context-menu')),
+        clipboard,
+        copiedSelection: clipboard.includes('${TARGET}')
+      }
+    `)
+  )
+  if (rightClickCopy.menuOpen) fail('right-click copy opened the menu', rightClickCopy)
+  if (!rightClickCopy.copiedSelection) {
+    fail('right-click did not copy the selection', rightClickCopy)
+  }
+  await new Promise((done) => setTimeout(done, 400))
+  if (received.includes('right-click-copy-sentinel-77')) {
+    fail('right-click copy also pasted the previous clipboard')
+  }
+  console.log('RIGHT_CLICK_COPY_OK')
 
   // 3a. Ctrl+C with a selection copies but does not send 0x03.
   const keyboardCopy = await evaluate(

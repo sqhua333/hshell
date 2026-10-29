@@ -43,8 +43,8 @@ export function ShortcutsDialog(): ReactElement | null {
       </div>
       <div className="form-hint">
         {tr(
-          `提示：终端中选中文本后 ${copyKey} 复制，未选中时 Ctrl+C 发送中断；${shiftCopyKey} 始终复制。右键粘贴，Shift+右键打开菜单。多行粘贴会先确认。`,
-          `Tip: ${copyKey} copies selected text in the terminal and Ctrl+C sends SIGINT when nothing is selected; ${shiftCopyKey} always copies. Right-click pastes; Shift+right-click opens the menu. Multi-line pastes ask for confirmation.`
+          `提示：终端中选中文本后 ${copyKey} 复制，未选中时 Ctrl+C 发送中断；${shiftCopyKey} 始终复制。有选中时右键复制，无选中时右键粘贴；Shift+右键打开菜单。多行粘贴会先确认。`,
+          `Tip: ${copyKey} copies selected text in the terminal and Ctrl+C sends SIGINT when nothing is selected; ${shiftCopyKey} always copies. Right-click copies when text is selected and pastes otherwise; Shift+right-click opens the menu. Multi-line pastes ask for confirmation.`
         )}
       </div>
     </Modal>

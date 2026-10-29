@@ -215,8 +215,9 @@ try {
   const client = new Client({ name: 'hshell-e2e', version: '0.0.0' })
   await client.connect(transport)
 
-  // 1. Execute: the tool call blocks until the card is confirmed.
-  const cmd = "printf 'AI_E2E_%s\\n' OK"
+  // 1. Execute: the tool call blocks until the card is confirmed. The command
+  // is long enough to wrap so the whole echoed block must be decorated.
+  const cmd = `echo "${'a'.repeat(120)}"; printf 'AI_E2E_%s\\n' OK`
   const approved = client.callTool({
     name: 'send_input',
     arguments: {
@@ -251,16 +252,20 @@ try {
   if (!ran.includes('AI_E2E_OK')) fail('approved command did not run', ran)
   const decoration = await evaluate(
     ui(`
-      await waitFor(
-        () => document.querySelector('.xterm-decoration-container .xterm-decoration'),
-        'AI echo decoration'
-      )
-      return {
-        decorations: document.querySelectorAll('.xterm-decoration-container .xterm-decoration').length
-      }
+      const decorations = () =>
+        [...document.querySelectorAll('.xterm-decoration-container .xterm-decoration')]
+      await waitFor(() => decorations().length > 0, 'AI echo decoration')
+      await sleep(300)
+      const tops = decorations().map((node) => node.style.top)
+      return { decorations: decorations().length, tops }
     `)
   )
-  if (decoration.decorations < 1) fail('AI echo was not decorated', decoration)
+  if (decoration.decorations < 2) {
+    fail('wrapped AI echo was only partly decorated', decoration)
+  }
+  if (new Set(decoration.tops).size !== decoration.decorations) {
+    fail('AI echo decorations share a row', decoration)
+  }
   if (process.env.E2E_AI_SHOT) {
     const shot = await send('Page.captureScreenshot', { format: 'png' })
     writeFileSync(process.env.E2E_AI_SHOT, Buffer.from(shot.data, 'base64'))
