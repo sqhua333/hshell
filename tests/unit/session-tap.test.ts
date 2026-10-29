@@ -104,6 +104,27 @@ describe('SessionTap buffering', () => {
     expect(() => tap.requireInput('rt-1')).toThrow(/AI 输入/)
   })
 
+  it('grants auto input only on top of a writable grant, and drops it with it', () => {
+    const tap = watchedTap()
+    tap.observeEvent({ type: 'ssh:status', runtimeId: 'rt-1', status: 'connected' })
+    expect(() => tap.setAutoInput('rt-1', true)).toThrow(/允许 AI 输入/)
+
+    tap.setWritable('rt-1', true)
+    tap.setAutoInput('rt-1', true)
+    expect(tap.list()[0].autoInput).toBe(true)
+    expect(tap.requireInput('rt-1').autoInput).toBe(true)
+
+    tap.setWritable('rt-1', false)
+    expect(tap.list()[0].autoInput).toBe(false)
+
+    tap.setWritable('rt-1', true)
+    tap.setAutoInput('rt-1', true)
+    tap.setWatched('rt-1', false)
+    tap.setWatched('rt-1', true)
+    expect(tap.list()[0].autoInput).toBe(false)
+    expect(tap.list()[0].writable).toBe(false)
+  })
+
   it('refuses input while the session is not connected', () => {
     const tap = watchedTap()
     tap.setWritable('rt-1', true)

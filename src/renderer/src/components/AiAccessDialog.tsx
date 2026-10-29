@@ -40,6 +40,7 @@ export function AiAccessDialog(): ReactElement | null {
 function AiAccessDialogInner(): ReactElement {
   const setOpen = useApp((state) => state.setAiDialogOpen)
   const setAiWatch = useApp((state) => state.setAiWatch)
+  const setAiInputMode = useApp((state) => state.setAiInputMode)
   const addToast = useApp((state) => state.addToast)
 
   const [info, setInfo] = useState<AiMcpInfo | null>(null)
@@ -117,18 +118,26 @@ function AiAccessDialogInner(): ReactElement {
     }
   }
 
-  const toggleWritable = async (item: AiSessionSummary): Promise<void> => {
+  const setMode = async (
+    item: AiSessionSummary,
+    mode: 'off' | 'manual' | 'auto'
+  ): Promise<void> => {
     try {
-      await api.ai.setWritable(item.runtimeId, !item.writable)
+      await setAiInputMode(item.runtimeId, mode)
       await loadSessions()
       addToast(
         'info',
-        item.writable
+        mode === 'off'
           ? tr('已禁止 AI 向该会话输入', 'AI input disabled for this session')
-          : tr(
-              '已允许 AI 申请输入；每次写入仍需你确认',
-              'AI may now request input; each write still needs your approval'
-            )
+          : mode === 'auto'
+            ? tr(
+                '已开启自动输入：AI 写入将直接发送，不再逐条确认',
+                'Auto input on: AI writes are sent without asking each time'
+              )
+            : tr(
+                '已允许 AI 申请输入；每次写入仍需你确认',
+                'AI may now request input; each write still needs your approval'
+              )
       )
     } catch (err) {
       setError((err as Error).message)
@@ -178,10 +187,13 @@ function AiAccessDialogInner(): ReactElement {
       subtitle={
         exposed
           ? tr(
-              `输入需审批 · 监听 ${info?.host}`,
-              `Input needs approval · listening on ${info?.host}`
+              `输入默认需审批 · 监听 ${info?.host}`,
+              `Input needs approval by default · listening on ${info?.host}`
             )
-          : tr('输入需审批 · 仅本机回环地址', 'Input needs approval · loopback only')
+          : tr(
+              '输入默认需审批 · 仅本机回环地址',
+              'Input needs approval by default · loopback only'
+            )
       }
       onClose={() => setOpen(false)}
       width={680}
@@ -206,8 +218,8 @@ function AiAccessDialogInner(): ReactElement {
     >
       <p className="form-hint">
         {tr(
-          'HShell 在本机提供一个 MCP 服务。只有下方列出的会话对 AI 可见；AI 可以读取输出和输入历史。对单独允许输入的会话，AI 每次写入都会弹出审批，确认后才发送。',
-          'HShell exposes an MCP server on this machine. Only the sessions listed below are visible; AI can read output and input history. For sessions you allow input on, every write opens an approval card and is sent only after you confirm.'
+          'HShell 在本机提供一个 MCP 服务。只有下方列出的会话对 AI 可见；AI 可以读取输出和输入历史。对允许输入的会话，默认每次写入都会弹出审批；也可以为单个会话开启「自动输入」，让写入直接发送（默认关闭，建议只对可信会话使用）。',
+          'HShell exposes an MCP server on this machine. Only the sessions listed below are visible; AI can read output and input history. Sessions you allow input on ask before every write by default; you can also enable “Auto input” per session to send writes without asking (off by default; use it only for sessions you trust).'
         )}
       </p>
       <p className="form-hint ai-warning">
@@ -354,6 +366,9 @@ function AiAccessDialogInner(): ReactElement {
                       {item.writable ? (
                         <span className="ai-writable-badge">{tr('可输入', 'input')}</span>
                       ) : null}
+                      {item.autoInput ? (
+                        <span className="ai-auto-badge">{tr('自动', 'auto')}</span>
+                      ) : null}
                     </div>
                     <div className="ai-session-meta">
                       {item.target} · {statusLabel(item.status)} ·{' '}
@@ -363,9 +378,24 @@ function AiAccessDialogInner(): ReactElement {
                   <div className="ai-session-actions">
                     <button
                       className="btn btn-small"
-                      onClick={() => void toggleWritable(item)}
+                      onClick={() => void setMode(item, item.writable ? 'off' : 'manual')}
                     >
                       {item.writable ? tr('禁止输入', 'Block input') : tr('允许输入', 'Allow input')}
+                    </button>
+                    <button
+                      className={`btn btn-small${item.autoInput ? ' ai-auto-btn' : ''}`}
+                      disabled={!item.writable}
+                      title={
+                        item.autoInput
+                          ? tr('恢复逐条确认', 'Ask before each write again')
+                          : tr(
+                              'AI 写入直接发送，不再逐条确认；仅对可信会话使用',
+                              'Send AI writes without asking each time; only for trusted sessions'
+                            )
+                      }
+                      onClick={() => void setMode(item, item.autoInput ? 'manual' : 'auto')}
+                    >
+                      {item.autoInput ? tr('取消自动', 'Stop auto') : tr('自动输入', 'Auto input')}
                     </button>
                     <button
                       className="btn btn-small"
@@ -379,8 +409,8 @@ function AiAccessDialogInner(): ReactElement {
             )}
             <p className="form-hint">
               {tr(
-                '「允许输入」后 AI 才能申请写入；每次写入都会在 HShell 弹出窗口，确认后才发送，拒绝或超时不会写入。',
-                '“Allow input” lets AI request writes. Every write opens an approval card in HShell and is only sent after you confirm; denying or ignoring it writes nothing.'
+                '「允许输入」后 AI 才能申请写入；默认每次写入都会在 HShell 弹出窗口，确认后才发送。「自动输入」会跳过确认直接发送，关闭输入或停止观察时自动收回，「自动输入」也只能通过这里开启。',
+                '“Allow input” lets AI request writes; by default every write opens an approval card in HShell. “Auto input” skips that card, is revoked when input or watching is turned off, and can only be enabled here.'
               )}
             </p>
           </div>

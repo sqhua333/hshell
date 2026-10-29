@@ -151,7 +151,9 @@ export default function App(): ReactElement {
           if (event.status === 'sent') {
             state.addToast(
               'info',
-              tr(`AI 已向 ${event.name} 发送输入`, `AI input sent to ${event.name}`)
+              event.auto
+                ? tr(`AI 已自动向 ${event.name} 发送输入`, `AI auto-sent input to ${event.name}`)
+                : tr(`AI 已向 ${event.name} 发送输入`, `AI input sent to ${event.name}`)
             )
           } else if (event.status === 'timeout') {
             state.addToast(

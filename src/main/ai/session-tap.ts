@@ -79,6 +79,11 @@ interface Channel {
   watched: boolean
   /** The user also allowed AI input; never implied by watching alone. */
   writable: boolean
+  /**
+   * Input skips the approval card. Only meaningful while `writable`, and
+   * cleared whenever input or watching is revoked.
+   */
+  autoInput: boolean
   chunks: AiChunk[]
   bytes: number
   nextSeq: number
@@ -139,6 +144,7 @@ export class SessionTap {
       lastActivityAt: now,
       watched: false,
       writable: false,
+      autoInput: false,
       chunks: [],
       bytes: 0,
       nextSeq: 1,
@@ -195,7 +201,10 @@ export class SessionTap {
     channel.watched = watched
     // Revoking visibility also revokes input; the two toggles are independent
     // to grant, but turning watching off must never leave write access behind.
-    if (!watched) channel.writable = false
+    if (!watched) {
+      channel.writable = false
+      channel.autoInput = false
+    }
   }
 
   /** Input requires watching, so the AI can see the result of what it sent. */
@@ -204,6 +213,20 @@ export class SessionTap {
     if (!channel) throw new Error('会话未注册或已断开')
     if (writable && !channel.watched) throw new Error('请先开启 AI 观察')
     channel.writable = writable
+    // Auto approval builds on the per-write grant; dropping one drops both.
+    if (!writable) channel.autoInput = false
+  }
+
+  /**
+   * Let writes bypass the approval card. Deliberately opt-in per session: the
+   * grant is cleared when input or watching is revoked and when the session
+   * disconnects.
+   */
+  setAutoInput(runtimeId: string, auto: boolean): void {
+    const channel = this.channels.get(runtimeId)
+    if (!channel) throw new Error('会话未注册或已断开')
+    if (auto && !channel.writable) throw new Error('请先允许 AI 输入')
+    channel.autoInput = auto
   }
 
   /**
@@ -248,7 +271,8 @@ export class SessionTap {
       bufferedBytes: channel.bytes,
       firstSeq: channel.firstSeq,
       latestSeq: Math.max(channel.firstSeq - 1, channel.nextSeq - 1),
-      writable: channel.watched && channel.writable
+      writable: channel.watched && channel.writable,
+      autoInput: channel.watched && channel.writable && channel.autoInput
     }
   }
 

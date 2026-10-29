@@ -35,4 +35,9 @@ describe('terminal clipboard shortcuts', () => {
     // shell; dialogs handle it themselves.
     expect(matchShortcut(key('Escape'))).toBeNull()
   })
+
+  it('toggles AI input from the keyboard', () => {
+    expect(matchShortcut(key('i', { ctrlKey: true, altKey: true }))?.action).toBe('ai:input')
+    expect(matchShortcut(key('i', { metaKey: true, altKey: true }))?.action).toBe('ai:input')
+  })
 })

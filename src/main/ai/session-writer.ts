@@ -102,7 +102,8 @@ export function createSessionWriter(deps: SessionWriterDeps): SessionWriter {
 
   const emitResult = (
     request: AiInputRequest,
-    outcome: AiInputOutcome
+    outcome: AiInputOutcome,
+    auto = false
   ): void => {
     deps.emit({
       type: 'ai:input-result',
@@ -110,8 +111,35 @@ export function createSessionWriter(deps: SessionWriterDeps): SessionWriter {
       runtimeId: request.runtimeId,
       name: request.name,
       status: outcome.status,
-      message: outcome.message
+      message: outcome.message,
+      ...(auto ? { auto: true } : {})
     })
+  }
+
+  /**
+   * Re-check the grant and write. Used by both the approval card and the
+   * auto-input path, so a revoked grant can never ride on stale state.
+   */
+  const deliver = (
+    request: AiInputRequest,
+    text: string,
+    submit: boolean
+  ): AiInputOutcome => {
+    try {
+      deps.tap.requireInput(request.runtimeId)
+    } catch (error) {
+      return refuse((error as Error).message)
+    }
+    const data = withEnter(text, submit)
+    if (!deps.write(request.runtimeId, data)) {
+      return refuse('会话已断开')
+    }
+    deps.tap.recordInput(request.runtimeId, data, 'ai')
+    // Emitted after the write but before the echo arrives, so the renderer can
+    // recognise and tint the echoed line without touching the terminal stream.
+    deps.emit({ type: 'ai:input-sent', runtimeId: request.runtimeId, text: data })
+    lastSentAt = now()
+    return { status: 'sent' }
   }
 
   const settle = (entry: Pending, outcome: AiInputOutcome): void => {
@@ -157,8 +185,13 @@ export function createSessionWriter(deps: SessionWriterDeps): SessionWriter {
       typeof input.reason === 'string' && input.reason.trim()
         ? input.reason.trim().slice(0, 512)
         : undefined
-    if (pending) return refuse('已有待审批的 AI 输入请求')
-    if (!deps.windowAvailable()) return refuse('HShell 窗口不可用，无法确认输入')
+    // Auto-input is an explicit per-session opt-in; it skips the card but not
+    // validation, throttling or the grant re-check inside `deliver`.
+    const auto = summary.autoInput
+    if (!auto) {
+      if (pending) return refuse('已有待审批的 AI 输入请求')
+      if (!deps.windowAvailable()) return refuse('HShell 窗口不可用，无法确认输入')
+    }
     if (now() - lastRequestedAt < MIN_INTERVAL_MS) {
       return refuse('请求过于频繁，请稍后再试')
     }
@@ -174,6 +207,23 @@ export function createSessionWriter(deps: SessionWriterDeps): SessionWriter {
       submit,
       reason,
       expiresAt: now() + approvalMs
+    }
+    if (auto) {
+      const outcome = deliver(req, text, submit)
+      audit({
+        at: new Date(now()).toISOString(),
+        id: req.id,
+        runtimeId,
+        name: summary.name,
+        text,
+        submit,
+        reason,
+        status: outcome.status,
+        message: outcome.message,
+        auto: true
+      })
+      emitResult(req, outcome, true)
+      return outcome
     }
     return new Promise<AiInputOutcome>((resolve) => {
       const timer = setTimeout(() => {
@@ -197,25 +247,7 @@ export function createSessionWriter(deps: SessionWriterDeps): SessionWriter {
       settle(entry, { status: 'denied' })
       return
     }
-    // The grant can be revoked or the session can drop between prompt and
-    // approval; re-check rather than trusting the state captured earlier.
-    try {
-      deps.tap.requireInput(req.runtimeId)
-    } catch (error) {
-      settle(entry, refuse((error as Error).message))
-      return
-    }
-    const data = withEnter(entry.text, entry.submit)
-    if (!deps.write(req.runtimeId, data)) {
-      settle(entry, refuse('会话已断开'))
-      return
-    }
-    deps.tap.recordInput(req.runtimeId, data, 'ai')
-    // Emitted after the write but before the echo arrives, so the renderer can
-    // recognise and tint the echoed line without touching the terminal stream.
-    deps.emit({ type: 'ai:input-sent', runtimeId: req.runtimeId, text: data })
-    lastSentAt = now()
-    settle(entry, { status: 'sent' })
+    settle(entry, deliver(req, entry.text, entry.submit))
   }
 
   const cancel = (runtimeId: string, message = '会话已断开'): void => {

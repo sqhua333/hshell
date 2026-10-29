@@ -66,3 +66,19 @@ export function findAiEchoMatch(stream: string, needle: string): AiEchoMatch | n
 export function aiEchoProbe(needle: string, maxChars = 24): string {
   return squash(needle).text.slice(0, maxChars)
 }
+
+/**
+ * Left offset (px) for the "AI input" tag that follows the echoed text on its
+ * row: one cell after the last character, clamped so the tag stays inside the
+ * terminal even when the command fills the row.
+ */
+export function aiTagLeft(
+  afterColumns: number,
+  cols: number,
+  cellWidth: number,
+  tagWidth: number
+): number {
+  const ideal = (Math.max(0, afterColumns) + 1) * cellWidth
+  const right = Math.max(0, cols * cellWidth - tagWidth - 2)
+  return Math.min(ideal, right)
+}

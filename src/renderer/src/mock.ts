@@ -709,6 +709,7 @@ export function createMockApi(): HshellApi {
       sessions: async () => [],
       setWatch: async () => undefined,
       setWritable: async () => undefined,
+      setAutoInput: async () => undefined,
       decideInput: async () => undefined,
       bindAddresses: async () => [],
       setHost: async () => {

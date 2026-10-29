@@ -685,6 +685,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     sessionTap.setWritable(id, Boolean(writable))
     if (!writable) aiWriter.cancel(id, 'AI 输入授权已撤销')
   })
+  handle('ai:setAutoInput', (runtimeId: unknown, auto: unknown) => {
+    sessionTap.setAutoInput(String(runtimeId), Boolean(auto))
+  })
   handle('ai:decideInput', (id: unknown, allow: unknown) => {
     aiWriter.decide(String(id), Boolean(allow))
   })

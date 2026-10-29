@@ -343,6 +343,8 @@ export type AppEvent =
       name: string
       status: AiInputStatus
       message?: string
+      /** The write was sent under the session's auto-input grant. */
+      auto?: boolean
     }
   | { type: 'menu:action'; action: string }
 
@@ -467,6 +469,8 @@ export interface AiSessionSummary {
   latestSeq: number
   /** The user also allowed AI input; every write still needs approval. */
   writable: boolean
+  /** Writes skip the approval card (still requires `writable`). */
+  autoInput: boolean
 }
 
 /** An AI client asked to type into a session; the user must approve it. */
@@ -593,6 +597,8 @@ export interface HshellApi {
     setWatch(runtimeId: string, watched: boolean): Promise<void>
     /** Grant or revoke AI input; every write still needs approval. */
     setWritable(runtimeId: string, writable: boolean): Promise<void>
+    /** Send input without asking; requires `setWritable` first. */
+    setAutoInput(runtimeId: string, auto: boolean): Promise<void>
     /** Approve or reject a pending AI input request. */
     decideInput(id: string, allow: boolean): Promise<void>
     /** Non-loopback IPv4 addresses HShell can bind the MCP server to. */

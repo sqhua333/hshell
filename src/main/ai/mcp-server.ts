@@ -41,7 +41,8 @@ function toolFailure(error: unknown): CallToolResult {
 /**
  * MCP surface over the session tap. Only sessions the user marked as watched
  * are listed or readable. When a writer is supplied, `send_input` is exposed
- * too, but every call still has to be approved inside HShell.
+ * too; calls are approved inside HShell unless the user granted that session
+ * automatic input.
  */
 function buildServer(
   tap: SessionTap,
@@ -157,14 +158,16 @@ function buildServer(
     server.registerTool(
       'send_input',
       {
-        title: 'Type into a session (requires human approval)',
+        title: 'Type into a session (human approval by default)',
         description:
-          'Send terminal input to a session the user allowed AI input for. HShell shows ' +
-          'the exact text and your reason to the user, and only writes after they approve; ' +
-          'the call blocks until then. Returns { status: "sent" | "denied" | "timeout" | ' +
-          '"blocked", message? }. With submit=true (default) Enter is appended. Control ' +
-          'characters other than tab/newline are rejected. Only printable text is allowed; ' +
-          'the user sees everything, including anything sensitive you type.',
+          'Send terminal input to a session the user allowed AI input for. By default ' +
+          'HShell shows the exact text and your reason to the user, and only writes after ' +
+          'they approve; the call blocks until then. The user may instead turn on auto ' +
+          'input for a session, in which case the write is sent without a confirmation ' +
+          'card. Returns { status: "sent" | "denied" | "timeout" | "blocked", message? }. ' +
+          'With submit=true (default) Enter is appended. Control characters other than ' +
+          'tab/newline are rejected. Only printable text is allowed; the user sees ' +
+          'everything, including anything sensitive you type.',
         inputSchema: {
           runtimeId: z.string().describe('runtimeId from list_sessions'),
           text: z

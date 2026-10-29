@@ -248,6 +248,33 @@ export async function runAction(action: ShortcutAction | string): Promise<void> 
       }
       break
 
+    case 'ai:input': {
+      const runtimeId = state.activeRuntimeId
+      const session = sessionForRuntime(runtimeId, state)
+      if (!runtimeId || !session || session.connectionType === 'ftp') {
+        state.addToast('warn', tr('当前会话不支持 AI 输入', 'This session does not support AI input'))
+        break
+      }
+      try {
+        // The shortcut only grants the per-write approval mode; auto-input is
+        // deliberately dialog-only so it cannot be switched on by accident.
+        const enabled = Boolean(state.aiInputModes[runtimeId])
+        await state.setAiInputMode(runtimeId, enabled ? 'off' : 'manual')
+        state.addToast(
+          'info',
+          enabled
+            ? tr('已禁止 AI 向该会话输入', 'AI input disabled for this session')
+            : tr(
+                '已允许 AI 申请输入；每次写入仍需你确认',
+                'AI may now request input; each write still needs your approval'
+              )
+        )
+      } catch (error) {
+        state.addToast('error', (error as Error).message)
+      }
+      break
+    }
+
     default:
       break
   }

@@ -70,6 +70,8 @@ const api: HshellApi = {
     setWatch: (runtimeId, watched) => ipcRenderer.invoke('ai:setWatch', runtimeId, watched),
     setWritable: (runtimeId, writable) =>
       ipcRenderer.invoke('ai:setWritable', runtimeId, writable),
+    setAutoInput: (runtimeId, auto) =>
+      ipcRenderer.invoke('ai:setAutoInput', runtimeId, auto),
     decideInput: (id, allow) => ipcRenderer.invoke('ai:decideInput', id, allow),
     bindAddresses: () => ipcRenderer.invoke('ai:bindAddresses'),
     setHost: (host) => ipcRenderer.invoke('ai:setHost', host)

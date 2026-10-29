@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react'
-import { Terminal, type IDecoration, type IMarker } from '@xterm/xterm'
+import { Terminal, type IBufferLine, type IDecoration, type IMarker } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
@@ -7,7 +7,7 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import type { Session, TriggerRule } from '@shared/types'
 import { isLocalSession, isSerialSession, isTelnetSession, sessionTarget } from '@shared/session'
 import { api } from '../api'
-import { aiEchoProbe, findAiEchoMatch, squashWhitespace } from '../lib/ai-echo'
+import { aiEchoProbe, aiTagLeft, findAiEchoMatch, squashWhitespace } from '../lib/ai-echo'
 import { resolveColorScheme } from '../lib/color-schemes'
 import { tr } from '../lib/i18n'
 import { matchShortcut } from '../lib/shortcuts'
@@ -101,10 +101,58 @@ function aiEchoBackground(session: Session): string {
   return `#${mixed.map((value) => value.toString(16).padStart(2, '0')).join('')}`
 }
 
+interface AiEchoTag {
+  text: string
+  /** Column just past the echoed text on the tagged row. */
+  afterColumns: number
+}
+
+/** End column of a row's text, counting wide characters as two cells. */
+function rowTextColumns(line: IBufferLine | undefined): number {
+  if (!line) return 0
+  let end = 0
+  const limit = Math.min(line.length, 4096)
+  for (let x = 0; x < limit; x += 1) {
+    const cell = line.getCell(x)
+    if (!cell) break
+    if (cell.getChars().trim() !== '') end = x + cell.getWidth()
+  }
+  return end
+}
+
+/**
+ * Put a small fixed label right after the echoed text. It is a DOM overlay
+ * anchored inside the row's decoration, so it scrolls with the buffer and
+ * never touches the terminal contents.
+ */
+function paintAiEchoTag(
+  element: HTMLElement,
+  tag: AiEchoTag,
+  cols: number
+): void {
+  let node = element.querySelector<HTMLElement>('.ai-echo-tag')
+  if (!node) {
+    node = document.createElement('span')
+    node.className = 'ai-echo-tag'
+    node.textContent = tag.text
+    node.style.visibility = 'hidden'
+    element.appendChild(node)
+  }
+  const width = element.clientWidth
+  const height = element.clientHeight
+  if (width <= 0) return
+  const cellWidth = width / Math.max(1, cols)
+  const left = aiTagLeft(tag.afterColumns, cols, cellWidth, node.offsetWidth)
+  node.style.left = `${left}px`
+  node.style.top = `${Math.max(0, (height - node.offsetHeight) / 2)}px`
+  node.style.visibility = 'visible'
+}
+
 function aiEchoDecoration(
   term: Terminal,
   lineFromEnd: number,
-  background: string
+  background: string,
+  tag?: AiEchoTag
 ): AppliedDecoration | null {
   try {
     const marker = term.registerMarker(-lineFromEnd)
@@ -119,6 +167,10 @@ function aiEchoDecoration(
     if (!decoration) {
       marker.dispose()
       return null
+    }
+    if (tag) {
+      const cols = term.cols
+      decoration.onRender((element) => paintAiEchoTag(element, tag, cols))
     }
     return { decoration, marker }
   } catch {
@@ -199,10 +251,17 @@ function anchorAiEcho(term: Terminal, anchor: AiEchoAnchor, schedule: Schedule):
   ) {
     lastLine += 1
   }
+  // The label goes after the last echoed row, which is normally the short
+  // wrapped tail rather than a full-width line of the command.
+  const tagColumns = rowTextColumns(buffer.getLine(lastLine))
   for (let index = 0; index <= lastLine - line; index += 1) {
     const lineFromEnd = cursorLine - (line + index)
     if (lineFromEnd < 0) continue
-    const entry = aiEchoDecoration(term, lineFromEnd, anchor.background)
+    const tag =
+      line + index === lastLine
+        ? { text: tr('AI 输入', 'AI input'), afterColumns: tagColumns }
+        : undefined
+    const entry = aiEchoDecoration(term, lineFromEnd, anchor.background, tag)
     if (!entry) continue
     entry.marker.onDispose(() => {
       if (anchor.stopped || anchor.releasing) return

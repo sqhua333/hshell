@@ -167,6 +167,8 @@ interface AppState {
   aiDialogOpen: boolean
   /** Runtime ids whose traffic the user exposes to AI clients. */
   aiWatched: string[]
+  /** Input grants per runtime: confirm each write, or send automatically. */
+  aiInputModes: Record<string, 'manual' | 'auto'>
   /** Pending AI input awaiting the user's approval, if any. */
   aiInputRequest: AiInputRequest | null
   appVersion: string
@@ -262,6 +264,8 @@ interface AppState {
   setTunnelsOpen(open: boolean): void
   setAiDialogOpen(open: boolean): void
   setAiWatch(runtimeId: string, watched: boolean): Promise<void>
+  /** `off` revokes input; `manual` asks before each write; `auto` does not. */
+  setAiInputMode(runtimeId: string, mode: 'off' | 'manual' | 'auto'): Promise<void>
   setAiInputRequest(request: AiInputRequest | null): void
   saveQuickCommands(list: QuickCommand[]): void
   setQuickCommandsOpen(open: boolean): void
@@ -444,6 +448,7 @@ export const useApp = create<AppState>((set, get) => ({
   tunnelsOpen: false,
   aiDialogOpen: false,
   aiWatched: [],
+  aiInputModes: {},
   aiInputRequest: null,
   appVersion: '0.2.3',
   defaultUsername: 'root',
@@ -1248,11 +1253,37 @@ export const useApp = create<AppState>((set, get) => ({
 
   async setAiWatch(runtimeId, watched) {
     await api.ai.setWatch(runtimeId, watched)
-    set((state) => ({
-      aiWatched: watched
-        ? [...new Set([...state.aiWatched, runtimeId])]
-        : state.aiWatched.filter((id) => id !== runtimeId)
-    }))
+    set((state) => {
+      const modes = { ...state.aiInputModes }
+      // Watching off revokes input in the main process; mirror that here so the
+      // status bar cannot keep showing a grant that no longer exists.
+      if (!watched) delete modes[runtimeId]
+      return {
+        aiWatched: watched
+          ? [...new Set([...state.aiWatched, runtimeId])]
+          : state.aiWatched.filter((id) => id !== runtimeId),
+        aiInputModes: modes
+      }
+    })
+  },
+
+  async setAiInputMode(runtimeId, mode) {
+    // Input requires watching; grant it in one step as the dialog does.
+    if (mode !== 'off' && !get().aiWatched.includes(runtimeId)) {
+      await get().setAiWatch(runtimeId, true)
+    }
+    if (mode === 'off') {
+      await api.ai.setWritable(runtimeId, false)
+    } else {
+      await api.ai.setWritable(runtimeId, true)
+      await api.ai.setAutoInput(runtimeId, mode === 'auto')
+    }
+    set((state) => {
+      const modes = { ...state.aiInputModes }
+      if (mode === 'off') delete modes[runtimeId]
+      else modes[runtimeId] = mode
+      return { aiInputModes: modes }
+    })
   },
 
   // Approval is urgent: close the settings dialog so the card has focus.

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { aiEchoProbe, findAiEchoMatch, squashWhitespace } from '../../src/renderer/src/lib/ai-echo'
+import {
+  aiEchoProbe,
+  aiTagLeft,
+  findAiEchoMatch,
+  squashWhitespace
+} from '../../src/renderer/src/lib/ai-echo'
 
 const needle = 'echo "==A=="; uname -a; echo "==END=="'
 
@@ -49,5 +54,20 @@ describe('short inputs', () => {
   it('does not fuzzy-match a short command against scattered characters', () => {
     const stream = 'lorem ipsum dolor sit amet\r\n'
     expect(findAiEchoMatch(stream, 'ls')).toBeNull()
+  })
+})
+
+describe('aiTagLeft', () => {
+  it('places the tag one cell after the echoed text', () => {
+    expect(aiTagLeft(10, 80, 8, 40)).toBe(88)
+  })
+
+  it('keeps the tag inside the terminal when the row is full', () => {
+    expect(aiTagLeft(79, 80, 8, 40)).toBe(640 - 40 - 2)
+    expect(aiTagLeft(500, 80, 8, 40)).toBe(598)
+  })
+
+  it('falls back to the left edge for an empty row', () => {
+    expect(aiTagLeft(0, 80, 8, 40)).toBe(8)
   })
 })

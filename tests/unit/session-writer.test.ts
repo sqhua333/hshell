@@ -104,6 +104,38 @@ describe('AI session writer', () => {
     expect(h.results()[0]?.status).toBe('sent')
   })
 
+  it('sends without a card when the session allows auto input', async () => {
+    const h = harness()
+    h.tap.setAutoInput('rt-1', true)
+    const outcome = await h.writer.request({
+      runtimeId: 'rt-1',
+      text: 'uptime',
+      reason: 'status check'
+    })
+    expect(outcome.status).toBe('sent')
+    expect(h.requests()).toHaveLength(0)
+    expect(h.writes).toEqual([{ runtimeId: 'rt-1', data: 'uptime\r' }])
+    expect(h.results()[0]).toMatchObject({ status: 'sent', auto: true })
+    const log = readFileSync(join(h.userData, 'ai-input.log'), 'utf8')
+    expect(JSON.parse(log.trim())).toMatchObject({
+      auto: true,
+      status: 'sent',
+      text: 'uptime',
+      reason: 'status check'
+    })
+  })
+
+  it('auto input still validates and re-checks the grant', async () => {
+    const h = harness()
+    h.tap.setAutoInput('rt-1', true)
+    const bad = await h.writer.request({ runtimeId: 'rt-1', text: 'echo \u001b[31mred' })
+    expect(bad.status).toBe('blocked')
+    h.tap.observeEvent({ type: 'ssh:status', runtimeId: 'rt-1', status: 'closed' })
+    const closed = await h.writer.request({ runtimeId: 'rt-1', text: 'ls' })
+    expect(closed.status).toBe('blocked')
+    expect(h.writes).toHaveLength(0)
+  })
+
   it('announces the written text so the pane can tint the echo', async () => {
     const h = harness()
     const pending = h.writer.request({ runtimeId: 'rt-1', text: 'ls -la' })

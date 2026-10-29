@@ -2825,6 +2825,19 @@ body.resizing-sidebar {
   color: var(--accent);
 }
 
+/* Auto-input is a standing grant: keep it visible even when the pane is idle. */
+.status-section.status-ai.auto {
+  color: #d97706;
+}
+
+.status-ai-mode {
+  margin-left: 4px;
+  padding: 0 4px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 9px;
+}
+
 .ai-code-row {
   display: flex;
   align-items: center;
@@ -2940,6 +2953,24 @@ body.resizing-sidebar {
   gap: 6px;
 }
 
+/* Fixed hint that follows an AI-echoed command inside the terminal. */
+.ai-echo-tag {
+  position: absolute;
+  z-index: 1;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: #7c3aed;
+  color: #ffffff;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 15px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+
 .ai-writable-badge {
   margin-left: 6px;
   padding: 0 5px;
@@ -2948,6 +2979,21 @@ body.resizing-sidebar {
   color: #b45309;
   font-size: 10px;
   vertical-align: 1px;
+}
+
+.ai-auto-badge {
+  margin-left: 4px;
+  padding: 0 5px;
+  border: 1px solid #dc2626;
+  border-radius: 999px;
+  color: #dc2626;
+  font-size: 10px;
+  vertical-align: 1px;
+}
+
+.btn.ai-auto-btn {
+  border-color: #dc2626;
+  color: #dc2626;
 }
 
 .ai-input-text {

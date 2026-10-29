@@ -29,6 +29,7 @@ export type ShortcutAction =
   | 'tools:keys'
   | 'tools:compose'
   | 'tools:record'
+  | 'ai:input'
 
 export interface ShortcutMatch {
   action: ShortcutAction
@@ -87,7 +88,8 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { combo: 'mod+shift+s', action: 'pane:split-h', label: '水平分屏', labelEn: 'Split horizontally', display: 'Ctrl+Shift+S' },
       { combo: 'mod+shift+d', action: 'pane:split-v', label: '垂直分屏', labelEn: 'Split vertically', display: 'Ctrl+Shift+D' },
       { combo: 'mod+shift+m', action: 'tools:compose', label: '撰写窗格', labelEn: 'Compose pane', display: 'Ctrl+Shift+M' },
-      { combo: 'mod+alt+r', action: 'tools:record', label: '录制 / 停止录制', labelEn: 'Record / stop recording', display: 'Ctrl+Alt+R' }
+      { combo: 'mod+alt+r', action: 'tools:record', label: '录制 / 停止录制', labelEn: 'Record / stop recording', display: 'Ctrl+Alt+R' },
+      { combo: 'mod+alt+i', action: 'ai:input', label: '允许 / 禁止 AI 向当前会话输入', labelEn: 'Allow / disable AI input for this session', display: 'Ctrl+Alt+I', displayMac: 'Cmd+Alt+I' }
     ]
   },
   {

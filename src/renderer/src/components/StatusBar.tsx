@@ -43,6 +43,9 @@ export function StatusBar(): ReactElement {
   const aiWatched = useApp((state) =>
     state.activeRuntimeId ? state.aiWatched.includes(state.activeRuntimeId) : false
   )
+  const aiMode = useApp((state) =>
+    state.activeRuntimeId ? state.aiInputModes[state.activeRuntimeId] : undefined
+  )
   const setAiWatch = useApp((state) => state.setAiWatch)
   const addToast = useApp((state) => state.addToast)
   const [clock, setClock] = useState(Date.now())
@@ -98,6 +101,7 @@ export function StatusBar(): ReactElement {
   // FTP sessions have no terminal traffic, so the main process never registers
   // them with the AI tap.
   const aiCapable = !!session && session.connectionType !== 'ftp' && current !== 'idle'
+  const aiInputKey = api.app.platform === 'darwin' ? 'Cmd+Alt+I' : 'Ctrl+Alt+I'
   const toggleAiWatch = async (): Promise<void> => {
     if (!activeRuntimeId) return
     try {
@@ -129,16 +133,35 @@ export function StatusBar(): ReactElement {
       <div className="status-spacer" />
       {aiCapable && activeRuntimeId ? (
         <button
-          className={`status-section status-ai${aiWatched ? ' active' : ''}`}
+          className={`status-section status-ai${aiWatched ? ' active' : ''}${
+            aiMode === 'auto' ? ' auto' : ''
+          }`}
           title={
-            aiWatched
+            (aiWatched
               ? tr('停止向 AI 公开该会话', 'Stop exposing this session to AI')
-              : tr('允许 AI 只读观察该会话', 'Let AI read this session (read-only)')
+              : tr('允许 AI 只读观察该会话', 'Let AI read this session (read-only)')) +
+            '\n' +
+            tr(
+              `${aiInputKey}：允许 / 禁止 AI 输入（逐条确认）`,
+              `${aiInputKey}: allow / disable AI input (each write is confirmed)`
+            ) +
+            (aiMode === 'auto'
+              ? '\n' +
+                tr(
+                  '当前为自动输入：AI 写入会直接发送，不再逐条确认',
+                  'Auto input is on: AI writes are sent without asking each time'
+                )
+              : '')
           }
           onClick={() => void toggleAiWatch()}
         >
           <Icon name="eye" size={12} />
           {tr('AI 观察', 'AI watch')}
+          {aiMode ? (
+            <span className="status-ai-mode">
+              {aiMode === 'auto' ? tr('自动输入', 'auto') : tr('可输入', 'input')}
+            </span>
+          ) : null}
         </button>
       ) : null}
       {recordingLabel ? (

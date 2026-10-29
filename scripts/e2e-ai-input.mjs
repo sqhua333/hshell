@@ -7,6 +7,7 @@
  *     clicking Execute writes the command and the shell runs it.
  *  3. Clicking Deny writes nothing and reports `denied`.
  *  4. Revoking the per-session grant makes the next call `blocked`.
+ *  5. Auto input sends without an approval card; Ctrl+Alt+I toggles the grant.
  *
  * Requires a prior `npm run build` (it launches out/main/index.js).
  * Usage: npm run e2e:ai-input
@@ -266,10 +267,36 @@ try {
   if (new Set(decoration.tops).size !== decoration.decorations) {
     fail('AI echo decorations share a row', decoration)
   }
+  const tag = await evaluate(
+    ui(`
+      const node = await waitFor(
+        () => document.querySelector('.xterm-decoration-container .ai-echo-tag'),
+        'AI echo tag'
+      )
+      await sleep(200)
+      const rect = node.getBoundingClientRect()
+      const screen = node.closest('.xterm-screen')?.getBoundingClientRect()
+      const style = getComputedStyle(node)
+      return {
+        text: node.textContent,
+        visible: style.visibility !== 'hidden' && rect.width > 0,
+        inside:
+          !!screen &&
+          rect.left >= screen.left - 1 &&
+          rect.right <= screen.right + 1 &&
+          rect.top >= screen.top - 1 &&
+          rect.bottom <= screen.bottom + 1
+      }
+    `)
+  )
+  if (!tag?.text || !/AI/.test(tag.text)) fail('AI echo tag is missing its text', tag)
+  if (!tag.visible) fail('AI echo tag is not visible', tag)
+  if (!tag.inside) fail('AI echo tag is outside the terminal', tag)
   if (process.env.E2E_AI_SHOT) {
     const shot = await send('Page.captureScreenshot', { format: 'png' })
     writeFileSync(process.env.E2E_AI_SHOT, Buffer.from(shot.data, 'base64'))
   }
+  console.log('AI_INPUT_TAG_OK')
   console.log('AI_INPUT_EXECUTE_OK')
 
   // 2. Deny: nothing is written.
@@ -314,6 +341,40 @@ try {
   if (modalAfterBlock) fail('blocked request still showed a prompt')
   console.log('AI_INPUT_BLOCKED_OK')
 
+  // 3b. Ctrl+Alt+I toggles input for the active session without the dialog.
+  const aiInputToggle = async () => {
+    const base = {
+      key: 'i',
+      code: 'KeyI',
+      windowsVirtualKeyCode: 73,
+      nativeVirtualKeyCode: 73,
+      modifiers: 3 // Alt + Ctrl
+    }
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', ...base })
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', ...base })
+  }
+  const waitWritable = (expected) =>
+    evaluate(
+      ui(`
+        const deadline = Date.now() + 5000
+        while (Date.now() < deadline) {
+          const list = await window.hshell.ai.sessions()
+          const item = list.find(
+            (entry) => entry.runtimeId === ${JSON.stringify(setup.runtimeId)}
+          )
+          if (item && item.writable === ${expected}) return true
+          await sleep(100)
+        }
+        return false
+      `)
+    )
+  if (!(await waitWritable(false))) fail('AI input was expected to be off before the shortcut')
+  await aiInputToggle()
+  if (!(await waitWritable(true))) fail('Ctrl+Alt+I did not allow AI input')
+  await aiInputToggle()
+  if (!(await waitWritable(false))) fail('Ctrl+Alt+I did not revoke AI input')
+  console.log('AI_INPUT_SHORTCUT_OK')
+
   // 4. Revoking watch while a prompt is open cancels it and blocks the write.
   await evaluate(
     ui(`
@@ -340,6 +401,42 @@ try {
     fail('revoking watch did not cancel the request', revokePayload)
   }
   console.log('AI_INPUT_REVOKE_CANCELS_OK')
+
+  // 5. Auto input: granted writes skip the card but still go through the tap.
+  await evaluate(
+    ui(`
+      await window.hshell.ai.setWatch(${JSON.stringify(setup.runtimeId)}, true)
+      await window.hshell.ai.setWritable(${JSON.stringify(setup.runtimeId)}, true)
+      await window.hshell.ai.setAutoInput(${JSON.stringify(setup.runtimeId)}, true)
+      return true
+    `)
+  )
+  // The writer enforces a 400 ms gap between requests.
+  await new Promise((done) => setTimeout(done, 600))
+  const autoSent = client.callTool({
+    name: 'send_input',
+    arguments: {
+      runtimeId: setup.runtimeId,
+      text: "printf 'AI_AUTO_%s\\n' OK",
+      reason: 'auto input e2e'
+    }
+  })
+  const autoPayload = JSON.parse(
+    (await withTimeout(autoSent, 10_000, 'auto send_input')).content[0].text
+  )
+  if (autoPayload.status !== 'sent') fail('auto input was not sent', autoPayload)
+  const autoRan = await evaluate(
+    ui(`
+      await waitFor(() => terminalText().includes('AI_AUTO_OK'), 'auto command output')
+      return {
+        text: terminalText(),
+        card: Boolean(document.querySelector('.ai-input-modal'))
+      }
+    `)
+  )
+  if (!autoRan.text.includes('AI_AUTO_OK')) fail('auto command did not run', autoRan)
+  if (autoRan.card) fail('auto input still showed an approval card', autoRan)
+  console.log('AI_INPUT_AUTO_OK')
 
   await client.close()
   cleanup()
