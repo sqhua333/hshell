@@ -259,7 +259,7 @@ function anchorAiEcho(term: Terminal, anchor: AiEchoAnchor, schedule: Schedule):
     if (lineFromEnd < 0) continue
     const tag =
       line + index === lastLine
-        ? { text: tr('AI 输入', 'AI input'), afterColumns: tagColumns }
+        ? { text: 'AI_IN', afterColumns: tagColumns }
         : undefined
     const entry = aiEchoDecoration(term, lineFromEnd, anchor.background, tag)
     if (!entry) continue

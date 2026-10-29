@@ -2,10 +2,12 @@
  * Matching for echoing approved AI input back to the terminal.
  *
  * The exact text written by the session writer is compared against the
- * terminal stream. A line editor can repaint the echo, and serial consoles
- * insert soft line breaks (plus the padding space that comes with them) at
- * their own margins, so whitespace is ignored when the exact text is not
- * found, and the hit is mapped back to the original string.
+ * terminal stream. A line editor can repaint the echo, and consoles insert
+ * soft line breaks (plus the padding space that comes with them) at their own
+ * margins, so whitespace is ignored when the exact text is not found. A shell
+ * that repaints its own input can also repeat the character at the wrap
+ * boundary, so as a last resort the head and tail of the input are matched
+ * separately. Every hit is mapped back to the original string.
  */
 
 export interface AiEchoMatch {
@@ -44,6 +46,9 @@ export function squashWhitespace(text: string): string {
   return text.replace(/\s+/g, '')
 }
 
+/** Non-whitespace characters used to find the head and tail of an echo. */
+const EDGE_CHARS = 24
+
 export function findAiEchoMatch(stream: string, needle: string): AiEchoMatch | null {
   if (!needle) return null
   const exact = stream.lastIndexOf(needle)
@@ -51,12 +56,30 @@ export function findAiEchoMatch(stream: string, needle: string): AiEchoMatch | n
   const target = squash(needle).text
   if (target.length < MIN_FUZZY_CHARS) return null
   const squashedStream = squash(stream)
-  const at = squashedStream.text.lastIndexOf(target)
-  if (at < 0) return null
-  return {
-    start: squashedStream.map[at],
-    end: squashedStream.map[at + target.length - 1] + 1
+  const flat = squashedStream.text
+  const map = squashedStream.map
+  const at = flat.lastIndexOf(target)
+  if (at >= 0) {
+    return { start: map[at], end: map[at + target.length - 1] + 1 }
   }
+  // A shell that repaints a line longer than the terminal width repeats the
+  // character at the soft-wrap boundary (`...ZI3` + newline + `mVEzi`), so the
+  // echo is no longer a clean copy of the input. Match its head and tail
+  // separately: both are far from the wraps, and together they still locate the
+  // echoed rows.
+  const head = target.slice(0, Math.min(EDGE_CHARS, target.length))
+  const headAt = flat.lastIndexOf(head)
+  if (headAt < 0) return null
+  const tail = target.slice(-Math.min(EDGE_CHARS, target.length))
+  const tailAt = flat.indexOf(tail, headAt + head.length)
+  // The echo can arrive in pieces; until roughly all of it is here, wait so
+  // the whole wrapped block is decorated at once instead of just its head.
+  if (tailAt < 0 && headAt + target.length > flat.length) return null
+  const endAt =
+    tailAt >= 0
+      ? Math.min(tailAt + tail.length - 1, flat.length - 1)
+      : Math.min(headAt + target.length, flat.length - 1)
+  return { start: map[headAt], end: map[endAt] + 1 }
 }
 
 /**

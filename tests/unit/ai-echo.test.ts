@@ -36,6 +36,27 @@ describe('AI echo matching', () => {
     )
   })
 
+  it('waits for the whole echo before matching a mangled one', () => {
+    const payload = 'abcdefghijklmnopqrstuvwxyz0123456789'.repeat(2)
+    const command = `echo '${payload}'; printf 'OK%s\\n' DONE`
+    // zle and friends repeat the boundary character when they redraw a line
+    // that is wider than the terminal.
+    const middle = payload.length / 2
+    const echoed = `${payload.slice(0, middle)}${payload[middle]}${payload.slice(middle)}`
+    // The head is already on screen, but most of the command is still in
+    // flight: decorating now would tint only the first row.
+    const partial = `root@SYSD:/# echo '${echoed.slice(0, 30)}`
+    expect(findAiEchoMatch(partial, command)).toBeNull()
+
+    const stream = `root@SYSD:/# echo '${echoed}'; printf 'OK%s\\n' DONE\r\n`
+    const match = findAiEchoMatch(stream, command)
+    expect(match).not.toBeNull()
+    expect(stream.slice(match!.start, match!.start + 6)).toBe("echo '")
+    expect(squashWhitespace(stream.slice(match!.start, match!.end))).toContain(
+      squashWhitespace(payload).slice(-24)
+    )
+  })
+
   it('returns null when the text never arrives', () => {
     expect(findAiEchoMatch('root@SYSD:/# ls\r\n', needle)).toBeNull()
     expect(findAiEchoMatch('', needle)).toBeNull()
