@@ -111,6 +111,27 @@ function byteLength(text: string): number {
 }
 
 /**
+ * Coalesce runs of adjacent chunks written by the same side. Terminal data
+ * arrives in small frames, so a full read can otherwise be thousands of tiny
+ * JSON objects and spend much of the client's token budget on per-chunk
+ * metadata instead of text. A merged chunk keeps the first `seq` and `at` of
+ * its run; `nextSeq` is computed from the unmerged chunks, so paging is
+ * unaffected.
+ */
+function mergeChunks(chunks: AiChunk[]): AiChunk[] {
+  const merged: AiChunk[] = []
+  for (const chunk of chunks) {
+    const last = merged[merged.length - 1]
+    if (last && last.direction === chunk.direction && last.source === chunk.source) {
+      last.text += chunk.text
+      continue
+    }
+    merged.push({ ...chunk })
+  }
+  return merged
+}
+
+/**
  * Read-only ring buffer of terminal traffic, keyed by runtime id.
  *
  * The main process is the only place that sees both directions of every
@@ -416,7 +437,7 @@ export class SessionTap {
       }
       return {
         runtimeId: channel.runtimeId,
-        chunks: picked,
+        chunks: mergeChunks(picked),
         nextSeq: picked.length ? picked[picked.length - 1].seq + 1 : channel.nextSeq,
         firstSeq: channel.firstSeq,
         truncated: false,
@@ -441,7 +462,7 @@ export class SessionTap {
     }
     return {
       runtimeId: channel.runtimeId,
-      chunks: picked,
+      chunks: mergeChunks(picked),
       nextSeq: picked.length ? picked[picked.length - 1].seq + 1 : Math.max(start, latest + 1),
       firstSeq: channel.firstSeq,
       truncated,

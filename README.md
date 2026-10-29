@@ -350,7 +350,8 @@ HShell 可以选择性地把会话流量提供给 AI 客户端（例如 Claude C
    MCP 地址、访问令牌或 `claude mcp add` 命令。
 3. 注册后的客户端可以调用以下工具：
    - `list_sessions`：列出已开启观察的会话及其缓冲范围；
-   - `read_session`：按 `sinceSeq` 读取输出/输入历史，自动去除 ANSI 与控制字符；
+   - `read_session`：按 `sinceSeq` 读取输出/输入历史，自动去除 ANSI 与控制字符，并把
+     相邻的同方向分段合并成一条，减少分段元数据带来的 token 开销；
    - `wait_for_output`：长轮询等待新输出、正则匹配或静默超时；
    - `send_input`：向「允许输入」的会话写入文本；每次都要在 HShell 中人工确认。
 

@@ -76,8 +76,10 @@ function buildServer(
       description:
         'Return terminal input and output captured for a watched session, oldest first. ' +
         'Pass sinceSeq to continue after a previous read; omit it to get the most recent ' +
-        'maxBytes. Text has ANSI escapes and control characters removed. `truncated` means ' +
-        'the requested sinceSeq is no longer buffered; `hasMore` means call again with nextSeq.',
+        'maxBytes. Text has ANSI escapes and control characters removed. Adjacent chunks ' +
+        'from the same side are merged into one entry (its seq is the first merged seq), ' +
+        'which cuts the metadata overhead of terminal output. `truncated` means the ' +
+        'requested sinceSeq is no longer buffered; `hasMore` means call again with nextSeq.',
       inputSchema: {
         runtimeId: z.string().describe('runtimeId from list_sessions'),
         sinceSeq: z

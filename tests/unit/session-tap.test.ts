@@ -143,7 +143,8 @@ describe('SessionTap buffering', () => {
     tap.recordOutput('rt-1', Buffer.from('bbb'))
     tap.recordOutput('rt-1', Buffer.from('ccc'))
     const tail = tap.read('rt-1')
-    expect(tail.chunks.map((chunk) => chunk.seq)).toEqual([1, 2, 3])
+    expect(tail.chunks.map((chunk) => chunk.seq)).toEqual([1])
+    expect(tail.chunks[0].text).toBe('aaabbbccc')
     // A limit smaller than the buffer keeps only the most recent chunk.
     const limited = tap.read('rt-1', undefined, 4)
     expect(limited.chunks.map((chunk) => chunk.text)).toEqual(['ccc'])
@@ -154,7 +155,8 @@ describe('SessionTap buffering', () => {
     const tap = watchedTap()
     for (const text of ['a', 'b', 'c']) tap.recordOutput('rt-1', Buffer.from(text))
     const first = tap.read('rt-1', 1, 2)
-    expect(first.chunks.map((chunk) => chunk.text)).toEqual(['a', 'b'])
+    expect(first.chunks.map((chunk) => chunk.text)).toEqual(['ab'])
+    expect(first.chunks[0].seq).toBe(1)
     expect(first.nextSeq).toBe(3)
     expect(first.hasMore).toBe(true)
     expect(first.truncated).toBe(false)
@@ -162,6 +164,25 @@ describe('SessionTap buffering', () => {
     const second = tap.read('rt-1', first.nextSeq, 2)
     expect(second.chunks.map((chunk) => chunk.text)).toEqual(['c'])
     expect(second.hasMore).toBe(false)
+  })
+
+  it('merges adjacent chunks from the same side without changing nextSeq', () => {
+    const tap = watchedTap()
+    tap.recordInput('rt-1', 'ls\r', 'ai')
+    tap.recordInput('rt-1', '\r', 'ai')
+    tap.recordOutput('rt-1', Buffer.from('one'))
+    tap.recordOutput('rt-1', Buffer.from('two'))
+    tap.recordInput('rt-1', 'echo hi\r', 'user')
+    const result = tap.read('rt-1')
+    // Same side and same source merge; direction and provenance boundaries stay.
+    expect(result.chunks.map((chunk) => [chunk.direction, chunk.source, chunk.text])).toEqual([
+      ['in', 'ai', 'ls\n\n'],
+      ['out', undefined, 'onetwo'],
+      ['in', 'user', 'echo hi\n']
+    ])
+    // A merged chunk keeps the first seq of its run, so the cursor is stable.
+    expect(result.chunks.map((chunk) => chunk.seq)).toEqual([1, 3, 5])
+    expect(result.nextSeq).toBe(6)
   })
 
   it('reports truncation once the ring buffer dropped older chunks', () => {

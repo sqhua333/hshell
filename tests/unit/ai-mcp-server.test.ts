@@ -184,10 +184,11 @@ describe('AI MCP server', () => {
       arguments: { runtimeId: 'rt-1' }
     })) as CallToolResult
     const payload = JSON.parse(textOf(read))
+    // Both sides are output, so the two records arrive as one merged chunk.
     expect(payload.chunks.map((chunk: { text: string }) => chunk.text)).toEqual([
-      'hidden',
-      'visible'
+      'hiddenvisible'
     ])
+    expect(payload.chunks[0].seq).toBe(1)
     expect(payload.nextSeq).toBe(3)
 
     await client.close()
