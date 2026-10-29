@@ -6,6 +6,7 @@ import { SerialPort } from 'serialport'
 import Zmodem from 'zmodem.js'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { AppEvent, Session } from '@shared/types'
+import { WAKE_DELAY_MS } from '../../src/main/serial/auto-login'
 import { SerialManager } from '../../src/main/serial/manager'
 
 /**
@@ -227,6 +228,41 @@ describe.skipIf(!HAS_SOCAT)('serial connections', () => {
     // terminal data path (which the AI tap and session log consume).
     expect(dataReceived(events)).not.toContain('console-secret')
     expect(events.some((event) => event.type === 'ssh:notice')).toBe(false)
+
+    manager.disconnect(RUNTIME)
+  }, 20_000)
+
+  it('nudges a silent console so an already displayed prompt reappears', async () => {
+    const pair = await startSocatPair()
+    const peer = await openPort(pair.b)
+    cleanup.push(() => closePort(peer))
+    const peerData: Buffer[] = []
+    peer.on('data', (chunk: Buffer) => peerData.push(chunk))
+    const peerText = () => Buffer.concat(peerData).toString('utf8')
+
+    const { manager, statuses } = createManager()
+    await manager.connect({
+      runtimeId: RUNTIME,
+      session: {
+        ...SESSION,
+        serial: {
+          ...SERIAL,
+          path: pair.a,
+          login: { enabled: true, username: 'root', password: 'console-secret' }
+        }
+      },
+      cols: 80,
+      rows: 24
+    })
+    await waitFor(() => statuses.includes('connected'))
+
+    // The board booted before the session opened and prints nothing; the
+    // Enter makes the login shell redraw its prompt.
+    await waitFor(() => peerText().includes('\r'), WAKE_DELAY_MS + 3000)
+    peer.write('board login: ')
+    await waitFor(() => peerText().includes('root\r'))
+    peer.write('Password: ')
+    await waitFor(() => peerText().includes('console-secret\r'))
 
     manager.disconnect(RUNTIME)
   }, 20_000)

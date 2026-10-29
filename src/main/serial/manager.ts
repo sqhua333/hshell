@@ -8,7 +8,7 @@ import type {
 } from '@shared/types'
 import { resolveLogDirectory, SessionLogger } from '../storage/session-log'
 import { ZmodemController, type ZmodemHost } from '../ssh/zmodem'
-import { SerialAutoLogin } from './auto-login'
+import { SerialAutoLogin, WAKE_DELAY_MS } from './auto-login'
 
 interface Runtime {
   runtimeId: string
@@ -263,6 +263,16 @@ export class SerialManager {
         host: this.zmodemHost
       })
       this.emit({ type: 'ssh:status', runtimeId: rt.runtimeId, status: 'connected' })
+      const login = rt.login
+      if (login) {
+        // A console that booted before HShell connected is sitting silently
+        // at its prompt; an Enter makes the shell redraw it.
+        const timer = setTimeout(() => {
+          if (this.runtimes.get(rt.runtimeId) !== rt || rt.login !== login) return
+          if (!login.finished && !login.sawData) this.write(rt.runtimeId, '\r')
+        }, WAKE_DELAY_MS)
+        timer.unref?.()
+      }
     })
   }
 
@@ -288,6 +298,9 @@ export class SerialManager {
    * Answer the console's login prompts. Writes go straight to the port, so
    * they never reach the AI tap or the session log; the password is only ever
    * the value resolved from the encrypted credential store.
+   *
+   * The engine stays attached after a successful login so that rebooting the
+   * device (or logging out on the console) triggers login again.
    */
   private feedAutoLogin(rt: Runtime, chunk: Buffer): void {
     const login = rt.login
@@ -302,9 +315,7 @@ export class SerialManager {
           message: event.notice.message
         })
       }
-      if (event.done) rt.login = null
     }
-    if (login.finished) rt.login = null
   }
 
   /** Serial links have no window size; the call keeps the API uniform. */

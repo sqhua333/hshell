@@ -1350,8 +1350,8 @@ function SessionDialogInner({
                       </label>
                       <div className="form-hint">
                         {tr(
-                          '默认在输出末尾匹配 login:/username: 与 Password:（不区分大小写）；提示符留空即使用默认值。密码错误会重试两次后停止，连接后 120 秒内未出现提示则不再尝试。密码不会写入会话文件、日志、导出或 AI 观察。',
-                          'By default the end of the output is matched against login:/username: and Password: (case-insensitive); leave the prompts empty to use these defaults. A wrong password is retried twice; matching stops 120 s after connecting. The password is never written to the session file, logs, exports or AI access.'
+                          '默认在行尾匹配 login:/username: 与 Password:（不区分大小写）；提示符留空即使用默认值。连接后 1.5 秒内没有任何输出时会先发送一次回车，让已经启动完成的板子重新显示提示符。用户名未被接收、密码错误或提示符再次出现时会重试，最多两次。每一步都有 120 秒窗口。登录成功后如果设备重启或退出登录，再次出现提示符会自动登录；密码被拒绝时不会反复重试。密码不会写入会话文件、日志、导出或 AI 观察。',
+                          'Prompts are matched at the end of a line against login:/username: and Password: (case-insensitive); leave the prompts empty to use these defaults. If no output arrives within 1.5 s of connecting, HShell sends one Enter so a board that already booted redraws its prompt. If the username is not taken, the password is wrong, or the prompt reappears, it retries up to twice. Every step has a 120 s window. After a successful login, a reboot or logout on the console logs in again; a rejected password is not retried forever. The password is never written to the session file, logs, exports or AI access.'
                         )}
                       </div>
                     </>

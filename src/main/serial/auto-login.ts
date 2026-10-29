@@ -3,14 +3,26 @@
  *
  * The board shows `login:` then `Password:` after boot; feed the captured
  * output here and write the returned text back to the port. The engine is
- * deliberately small: one username and one password per boot, a bounded
+ * deliberately small: one username and one password per cycle, a bounded
  * number of retries, and no knowledge of any other console input.
+ *
+ * Matching is line based rather than "end of buffer": a board often keeps
+ * printing service messages after the login prompt, and the prompt can be
+ * followed by those bytes. Anchoring to the end of a line still avoids
+ * matching banners such as `Last login: Mon ...` on the same line.
+ *
+ * After a successful login the engine stays idle instead of switching off:
+ * when the console shows the login prompt again (the device was rebooted or
+ * the user typed `exit`) it logs in again. Only a successful cycle re-arms,
+ * so a rejected password is never retried forever, and the prompt must end
+ * the output, so text printed by `cat` or `dmesg` cannot make the engine type
+ * the password at a shell prompt.
  */
 
 export interface SerialLoginConfig {
   username: string
   password?: string
-  /** Prompt markers; matched case-insensitively at the end of the output. */
+  /** Prompt markers; matched case-insensitively at the end of a line. */
   loginPrompt?: string
   passwordPrompt?: string
 }
@@ -33,10 +45,17 @@ export const LOGIN_TIMEOUT_MS = 120_000
 /** Stop watching for failures once the password has been sent. */
 export const VERIFY_TIMEOUT_MS = 15_000
 export const MAX_LOGIN_RETRIES = 2
+/**
+ * If the console is completely silent after connecting, an Enter usually
+ * makes an already displayed `login:` prompt reappear. Without it, opening
+ * HShell after the board has booted would never see a prompt at all.
+ */
+export const WAKE_DELAY_MS = 1_500
 const PROBE_CHARS = 4096
+const MAX_STEPS = 8
 
-const DEFAULT_LOGIN_PROMPT = /(?:login|username)\s*[:：]\s*$/i
-const DEFAULT_PASSWORD_PROMPT = /password\s*[:：]\s*$/i
+const LOGIN_WORDS = '(?:login|username)'
+const PASSWORD_WORDS = 'password'
 const LOGIN_FAILED = /login\s+incorrect|login\s+failed|authentication\s+failure|incorrect\s+password/i
 
 /** Strip ANSI escapes and carriage returns so prompts match cleanly. */
@@ -51,28 +70,44 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-function promptMatcher(prompt: string | undefined, fallback: RegExp): (text: string) => boolean {
-  if (!prompt?.trim()) return (text) => fallback.test(text)
-  const pattern = new RegExp(`${escapeRegExp(prompt.trim())}\\s*[:：]?\\s*$`, 'i')
-  return (text) => pattern.test(text)
+interface PromptMatcher {
+  /** Anywhere at the end of a line; used while a login is in progress. */
+  line: RegExp
+  /** Only at the very end of the captured output; used to re-arm. */
+  end: RegExp
+}
+
+function promptMatcher(prompt: string | undefined, words: string): PromptMatcher {
+  const trimmed = prompt?.trim()
+  const base = trimmed ? escapeRegExp(trimmed) : words
+  // The defaults require the colon so bare words in boot logs do not match.
+  const colon = trimmed ? '[:：]?' : '[:：]'
+  return {
+    line: new RegExp(`${base}\\s*${colon}\\s*(?:\\n|$)`, 'i'),
+    end: new RegExp(`${base}\\s*${colon}\\s*$`, 'i')
+  }
 }
 
 export class SerialAutoLogin {
   private stage: 'login' | 'password' | 'verify' | 'done' = 'login'
-  private probe = ''
+  /** Cleaned, not-yet-consumed console output. */
+  private buffer = ''
   private retries = 0
   private deadline: number
   private verifyUntil = 0
-  private readonly matchLogin: (text: string) => boolean
-  private readonly matchPassword: (text: string) => boolean
+  private received = false
+  /** The last cycle ended with the console accepting the password. */
+  private succeeded = false
+  private readonly matchLogin: PromptMatcher
+  private readonly matchPassword: PromptMatcher
 
   constructor(
     private readonly config: SerialLoginConfig,
     private readonly now: () => number = Date.now
   ) {
     this.deadline = now() + LOGIN_TIMEOUT_MS
-    this.matchLogin = promptMatcher(config.loginPrompt, DEFAULT_LOGIN_PROMPT)
-    this.matchPassword = promptMatcher(config.passwordPrompt, DEFAULT_PASSWORD_PROMPT)
+    this.matchLogin = promptMatcher(config.loginPrompt, LOGIN_WORDS)
+    this.matchPassword = promptMatcher(config.passwordPrompt, PASSWORD_WORDS)
   }
 
   get finished(): boolean {
@@ -83,28 +118,129 @@ export class SerialAutoLogin {
     return this.retries
   }
 
+  /** True once any console output arrived; used to decide whether to wake. */
+  get sawData(): boolean {
+    return this.received
+  }
+
   /** Feed captured console output and get everything that should happen. */
   feed(text: string): SerialLoginEvent[] {
-    if (this.stage === 'done' || !text) return []
+    if (!text) return []
+    this.received = true
     const now = this.now()
-    if (this.stage === 'verify') {
-      if (now > this.verifyUntil) {
-        this.stage = 'done'
-        return [{ done: true }]
-      }
-    } else if (now > this.deadline) {
+
+    if (this.stage === 'done') return this.rearm(text)
+    if (this.stage === 'verify' && now > this.verifyUntil) {
+      // The password was accepted and the console has been quiet since; the
+      // text starts a new line and may already be a fresh login prompt.
       this.stage = 'done'
+      this.succeeded = true
+      const events = this.rearm(text)
+      return events.length ? events : [{ done: true }]
+    }
+    if (this.stage !== 'verify' && now > this.deadline) {
+      this.stage = 'done'
+      this.buffer = ''
       return [{ done: true }]
     }
 
-    this.probe = cleanConsoleText(this.probe + text).slice(-PROBE_CHARS)
+    this.buffer = cleanConsoleText(this.buffer + text).slice(-PROBE_CHARS)
+    return this.process(now)
+  }
+
+  /** Start a new cycle when a finished console shows the login prompt again. */
+  private rearm(text: string): SerialLoginEvent[] {
+    if (!this.succeeded) return []
+    this.buffer = cleanConsoleText(this.buffer + text).slice(-PROBE_CHARS)
+    if (!this.matchLogin.end.test(this.buffer)) return []
+    this.stage = 'login'
+    this.retries = 0
+    this.succeeded = false
+    this.deadline = this.now() + LOGIN_TIMEOUT_MS
+    return this.process(this.now())
+  }
+
+  private process(now: number): SerialLoginEvent[] {
     const events: SerialLoginEvent[] = []
 
-    if (this.stage === 'verify') {
-      if (LOGIN_FAILED.test(this.probe)) {
+    // A prompt and the next prompt can share a chunk (or arrive while the
+    // previous prompt was split across chunks), so keep consuming.
+    for (let step = 0; step < MAX_STEPS; step += 1) {
+      if (this.stage === 'login') {
+        const rest = this.consume(this.matchLogin.line)
+        if (rest === null) break
+        this.buffer = rest
+        this.stage = 'password'
+        // The board may have taken a while to boot; give each step its own
+        // window instead of spending the whole budget before the prompt.
+        this.deadline = now + LOGIN_TIMEOUT_MS
+        if (this.config.username) events.push({ send: this.config.username })
+        continue
+      }
+
+      if (this.stage === 'password') {
+        const rest = this.consume(this.matchPassword.line)
+        if (rest !== null) {
+          this.buffer = rest
+          if (!this.config.password) {
+            this.stage = 'done'
+            this.buffer = ''
+            events.push({
+              notice: {
+                level: 'warn',
+                message: '串口自动登录：没有可用的密码，已停止自动登录'
+              },
+              done: true
+            })
+            return events
+          }
+          this.stage = 'verify'
+          this.verifyUntil = now + VERIFY_TIMEOUT_MS
+          events.push({ send: this.config.password })
+          continue
+        }
+        // The board asked for the login name again: the first write arrived
+        // before the console was reading, which is common right after boot.
+        const again = this.consume(this.matchLogin.line)
+        if (again !== null) {
+          this.buffer = again
+          this.retries += 1
+          if (this.retries > MAX_LOGIN_RETRIES) {
+            this.stage = 'done'
+            this.buffer = ''
+            events.push({
+              notice: {
+                level: 'warn',
+                message: '串口自动登录失败：登录提示反复出现，已停止自动登录'
+              },
+              done: true
+            })
+            return events
+          }
+          this.deadline = now + LOGIN_TIMEOUT_MS
+          events.push({
+            notice: {
+              level: 'warn',
+              message: `串口自动登录未生效，重新发送用户名（${this.retries}/${MAX_LOGIN_RETRIES}）`
+            }
+          })
+          if (this.config.username) events.push({ send: this.config.username })
+          continue
+        }
+        break
+      }
+
+      if (this.stage === 'verify') {
+        const failed = LOGIN_FAILED.test(this.buffer)
+        const again = this.consume(this.matchLogin.line)
+        if (again === null) break
+        // A login prompt after the password means it was not accepted,
+        // whether or not the console printed an explicit error.
+        this.buffer = again
         this.retries += 1
         if (this.retries > MAX_LOGIN_RETRIES) {
           this.stage = 'done'
+          this.buffer = ''
           events.push({
             notice: {
               level: 'warn',
@@ -114,44 +250,30 @@ export class SerialAutoLogin {
           })
           return events
         }
-        this.stage = 'login'
+        this.stage = 'password'
         this.deadline = now + LOGIN_TIMEOUT_MS
         events.push({
           notice: {
             level: 'warn',
-            message: `串口自动登录失败，等待重新登录（${this.retries}/${MAX_LOGIN_RETRIES}）`
+            message: failed
+              ? `串口自动登录失败，等待重新登录（${this.retries}/${MAX_LOGIN_RETRIES}）`
+              : `串口自动登录未完成，重新发送用户名（${this.retries}/${MAX_LOGIN_RETRIES}）`
           }
         })
-        // The console usually prints the next login prompt in the same chunk;
-        // keep the tail so the retry is not delayed by another prompt.
-        if (!this.matchLogin(this.probe)) return events
-        this.probe = ''
-        this.stage = 'password'
         if (this.config.username) events.push({ send: this.config.username })
-        return events
+        continue
       }
-      return events
-    }
 
-    if (this.stage === 'login' && this.matchLogin(this.probe)) {
-      this.probe = ''
-      this.stage = 'password'
-      if (this.config.username) events.push({ send: this.config.username })
-      return events
-    }
-
-    if (this.stage === 'password' && this.matchPassword(this.probe)) {
-      this.probe = ''
-      if (!this.config.password) {
-        this.stage = 'done'
-        return [{ done: true }]
-      }
-      this.stage = 'verify'
-      this.verifyUntil = now + VERIFY_TIMEOUT_MS
-      events.push({ send: this.config.password })
-      return events
+      break
     }
 
     return events
+  }
+
+  /** Drop everything through the matched prompt and return the remainder. */
+  private consume(pattern: RegExp): string | null {
+    const match = pattern.exec(this.buffer)
+    if (!match) return null
+    return this.buffer.slice(match.index + match[0].length)
   }
 }
