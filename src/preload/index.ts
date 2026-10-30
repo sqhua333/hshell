@@ -36,6 +36,8 @@ const api: HshellApi = {
   sessions: {
     list: () => ipcRenderer.invoke('sessions:list'),
     save: (session) => ipcRenderer.invoke('sessions:save', session),
+    move: (id, folderId, beforeId) =>
+      ipcRenderer.invoke('sessions:move', id, folderId, beforeId),
     remove: (id) => ipcRenderer.invoke('sessions:remove', id),
     saveFolder: (folder) => ipcRenderer.invoke('folders:save', folder),
     removeFolder: (id) => ipcRenderer.invoke('folders:remove', id),

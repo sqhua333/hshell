@@ -553,6 +553,12 @@ export interface HshellApi {
   sessions: {
     list(): Promise<SessionData>
     save(session: Session): Promise<Session>
+    /**
+     * Insert a session just before `beforeId` in `folderId`, or at the end of
+     * the list when `beforeId` is null, and return the reordered list. Used for
+     * drag-and-drop in the sidebar.
+     */
+    move(id: string, folderId: string | null, beforeId: string | null): Promise<SessionData>
     remove(id: string): Promise<void>
     saveFolder(folder: Folder): Promise<Folder>
     removeFolder(id: string): Promise<void>

@@ -181,6 +181,8 @@ interface AppState {
   /** Open the current system's default shell in a new tab. */
   openLocalShell(): void
   closeTab(tabId: string): void
+  /** Open the tab's sessions again in a new tab, next to the original. */
+  duplicateTab(tabId: string): void
   activateTab(tabId: string): void
   nextTab(delta: number): void
   selectTabIndex(index: number): void
@@ -248,6 +250,11 @@ interface AppState {
   ): void
   closeSessionDialog(): void
   saveSession(session: Session): Promise<void>
+  /**
+   * Insert a session just before `beforeId` in `folderId` (or at the end when
+   * null). Reordering the sidebar is the same operation within one folder.
+   */
+  moveSession(id: string, folderId: string | null, beforeId: string | null): Promise<void>
   deleteSession(id: string): Promise<void>
   deleteFolder(id: string): Promise<void>
   createFolder(name: string, parentId: string | null): Promise<void>
@@ -620,6 +627,44 @@ export const useApp = create<AppState>((set, get) => ({
       activeRuntimeId = next?.panes[0]?.runtimeId ?? null
     }
     set({ tabs, activeTabId, activeRuntimeId })
+    scheduleLayoutSave(get)
+  },
+
+  duplicateTab(tabId) {
+    const state = get()
+    const source = state.tabs.find((item) => item.id === tabId)
+    if (!source) return
+    // Clone the whole pane tree so a duplicated split keeps its shape. Every
+    // pane gets a fresh runtime and connects again, exactly like reopening the
+    // same sessions in a new tab.
+    const layout = cloneLayoutForSplit(source.layout)
+    const panes = collectPanes(layout)
+    const statuses = { ...state.statuses }
+    for (const pane of panes) statuses[pane.runtimeId] = { status: 'connecting' }
+    const tab: TabState = {
+      id: uid('tab'),
+      session: { ...source.session, auth: { ...source.session.auth } },
+      paneSessions: source.paneSessions
+        ? Object.fromEntries(
+            Object.entries(source.paneSessions).map(([id, session]) => [
+              id,
+              { ...session, auth: { ...session.auth } }
+            ])
+          )
+        : undefined,
+      panes,
+      layout
+    }
+    const index = state.tabs.findIndex((item) => item.id === tabId)
+    const tabs = [...state.tabs]
+    tabs.splice(index + 1, 0, tab)
+    set({
+      tabs,
+      activeTabId: tab.id,
+      activeRuntimeId: panes[0]?.runtimeId ?? null,
+      lastSessionId: tab.session.id,
+      statuses
+    })
     scheduleLayoutSave(get)
   },
 
@@ -1185,6 +1230,20 @@ export const useApp = create<AppState>((set, get) => ({
       'info',
       tr(`会话「${saved.name}」已保存`, `Session "${saved.name}" saved`)
     )
+  },
+
+  async moveSession(id, folderId, beforeId) {
+    if (id === beforeId) return
+    try {
+      const data = await api.sessions.move(id, folderId, beforeId)
+      set({ folders: data.folders, sessions: data.sessions })
+    } catch (error) {
+      const message = (error as Error).message
+      get().addToast(
+        'error',
+        tr(`移动会话失败：${message}`, `Could not move the session: ${message}`)
+      )
+    }
   },
 
   async deleteSession(id) {

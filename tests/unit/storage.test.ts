@@ -475,6 +475,45 @@ describe('AppStore persistence', () => {
     expect(stored?.serial?.login?.password).toBeUndefined()
   })
 
+  it('reorders and moves sessions between folders in persisted order', () => {
+    const dir = tempDir('hshell-store-move-')
+    const store = new AppStore(dir)
+    for (const id of ['s-a', 's-b', 's-c']) {
+      store.saveSession(makeSession({ id, folderId: 'f-prod' }))
+    }
+
+    const orderOf = (data: SessionData, folderId: string | null): string[] =>
+      data.sessions.filter((item) => item.folderId === folderId).map((item) => item.id)
+
+    const reordered = store.moveSession('s-c', 'f-prod', 's-a')
+    expect(orderOf(reordered, 'f-prod')).toEqual([
+      's-demo-web',
+      's-demo-db',
+      's-c',
+      's-a',
+      's-b'
+    ])
+
+    // The array order is the display order, so the new position survives a restart.
+    expect(orderOf(new AppStore(dir).list(), 'f-prod')).toEqual([
+      's-demo-web',
+      's-demo-db',
+      's-c',
+      's-a',
+      's-b'
+    ])
+
+    const moved = store.moveSession('s-a', 'f-local', null)
+    expect(orderOf(moved, 'f-local')).toEqual(['s-local', 's-a'])
+    expect(moved.sessions.find((item) => item.id === 's-a')?.folderId).toBe('f-local')
+
+    // Unknown folders and anchors fall back to the root/end instead of losing data.
+    const rooted = store.moveSession('s-a', 'f-missing', 's-missing')
+    expect(rooted.sessions.find((item) => item.id === 's-a')?.folderId).toBeNull()
+    expect(rooted.sessions.at(-1)?.id).toBe('s-a')
+    expect(() => store.moveSession('s-nope', null, null)).toThrow('会话不存在')
+  })
+
   it('migrates v1 files and rejects folder cycles', () => {
     const dir = tempDir('hshell-migrate-')
     writeFileSync(

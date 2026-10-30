@@ -1,6 +1,7 @@
 /**
- * Drag payload for moving a session from the sidebar onto a terminal pane.
- * A custom MIME type keeps unrelated text drops from triggering a split.
+ * Drag payload for moving a session from the sidebar onto a terminal pane, or
+ * within the sidebar to reorder it. A custom MIME type keeps unrelated text
+ * drops from triggering a split.
  */
 export const SESSION_DRAG_MIME = 'application/x-hshell-session'
 
@@ -9,7 +10,10 @@ export function setSessionDragData(dataTransfer: DataTransfer, sessionId: string
   // Some platforms only expose plain text during a drag; the custom type stays
   // authoritative and `types` is all we inspect while hovering.
   dataTransfer.setData('text/plain', sessionId)
-  dataTransfer.effectAllowed = 'copy'
+  // The terminal "copies" the session into a new pane, while the sidebar moves
+  // the entry, so both effects must be offered or the cursor shows a no-drop
+  // sign over one of the two targets.
+  dataTransfer.effectAllowed = 'copyMove'
 }
 
 export function readSessionDragId(dataTransfer: DataTransfer): string | null {

@@ -369,6 +369,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     }
     return saved
   })
+  handle(
+    'sessions:move',
+    (id: string, folderId: string | null, beforeId: string | null) =>
+      store.moveSession(String(id), folderId ?? null, beforeId ?? null)
+  )
   handle('sessions:remove', (id: string) => {
     const sessionId = String(id)
     const previous = store.findSession(sessionId)

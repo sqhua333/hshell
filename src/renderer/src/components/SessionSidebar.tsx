@@ -3,6 +3,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type DragEvent as ReactDragEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactElement
@@ -11,7 +12,7 @@ import type { Folder, Session } from '@shared/types'
 import { sessionTarget } from '@shared/session'
 import { api } from '../api'
 import { tr } from '../lib/i18n'
-import { setSessionDragData } from '../lib/session-drag'
+import { isSessionDrag, readSessionDragId, setSessionDragData } from '../lib/session-drag'
 import { SIDEBAR_DEFAULT_PX } from '../lib/sidebar-width'
 import { useApp } from '../store'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
@@ -26,6 +27,12 @@ interface MenuState {
   folder?: Folder
 }
 
+/** Where a dragged session would land if released right now. */
+type DropTarget =
+  | { kind: 'session'; id: string; position: 'before' | 'after' }
+  | { kind: 'folder'; id: string }
+  | { kind: 'root' }
+
 export function SessionSidebar(): ReactElement {
   const folders = useApp((state) => state.folders)
   const sessions = useApp((state) => state.sessions)
@@ -35,6 +42,7 @@ export function SessionSidebar(): ReactElement {
   const deleteSession = useApp((state) => state.deleteSession)
   const deleteFolder = useApp((state) => state.deleteFolder)
   const saveSession = useApp((state) => state.saveSession)
+  const moveSession = useApp((state) => state.moveSession)
   const setFolderDialogOpen = useApp((state) => state.setFolderDialogOpen)
   const reloadSessions = useApp((state) => state.reloadSessions)
   const addToast = useApp((state) => state.addToast)
@@ -51,6 +59,7 @@ export function SessionSidebar(): ReactElement {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
   const [headerMenu, setHeaderMenu] = useState<{ x: number; y: number } | null>(null)
   const [passwordPrompt, setPasswordPrompt] = useState<{ message: string } | null>(null)
   const [password, setPassword] = useState('')
@@ -80,6 +89,18 @@ export function SessionSidebar(): ReactElement {
       searchRef.current?.select()
     }
   }, [searchFocusNonce])
+
+  // Drags can end outside the tree (or be cancelled with Esc), and the
+  // dragover handler only tracks rows it has seen, so clear on every end.
+  useEffect(() => {
+    const clear = (): void => setDropTarget(null)
+    window.addEventListener('dragend', clear)
+    window.addEventListener('drop', clear)
+    return () => {
+      window.removeEventListener('dragend', clear)
+      window.removeEventListener('drop', clear)
+    }
+  }, [])
 
   const q = query.trim().toLowerCase()
   const filtered = q
@@ -121,6 +142,54 @@ export function SessionSidebar(): ReactElement {
       createdAt: now,
       updatedAt: now
     })
+  }
+
+  /** Sessions in one folder, in the order the tree renders them. */
+  const siblings = (folderId: string | null): Session[] =>
+    sessions.filter((session) => session.folderId === folderId)
+
+  /**
+   * Insert the dragged session before/after `target`. "After" is expressed as
+   * "before the next sibling"; the dragged session itself is never a valid
+   * anchor (it is removed before the insertion point is resolved).
+   */
+  const dropOnSession = (event: ReactDragEvent<HTMLElement>, target: Session): void => {
+    event.preventDefault()
+    event.stopPropagation()
+    const draggedId = readSessionDragId(event.dataTransfer)
+    setDropTarget(null)
+    if (!draggedId || draggedId === target.id) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    const after = event.clientY > rect.top + rect.height / 2
+    const list = siblings(target.folderId)
+    const index = list.findIndex((item) => item.id === target.id)
+    const beforeId = after ? list[index + 1]?.id ?? null : target.id
+    if (beforeId === draggedId) return
+    void moveSession(draggedId, target.folderId, beforeId)
+  }
+
+  const dropOnFolder = (event: ReactDragEvent<HTMLElement>, folder: Folder): void => {
+    event.preventDefault()
+    event.stopPropagation()
+    const draggedId = readSessionDragId(event.dataTransfer)
+    setDropTarget(null)
+    if (!draggedId) return
+    // The folder opens so the moved session is visible where it landed.
+    setCollapsed((previous) => {
+      if (!previous.has(folder.id)) return previous
+      const next = new Set(previous)
+      next.delete(folder.id)
+      return next
+    })
+    void moveSession(draggedId, folder.id, null)
+  }
+
+  const dropOnRoot = (event: ReactDragEvent<HTMLElement>): void => {
+    event.preventDefault()
+    event.stopPropagation()
+    const draggedId = readSessionDragId(event.dataTransfer)
+    setDropTarget(null)
+    if (draggedId) void moveSession(draggedId, null, null)
   }
 
   const resetExportDialog = (): void => {
@@ -339,18 +408,47 @@ export function SessionSidebar(): ReactElement {
       key={session.id}
       className={`session-row ${selectedId === session.id ? 'selected' : ''} ${
         activeSessionId === session.id ? 'active' : ''
+      } ${
+        dropTarget?.kind === 'session' && dropTarget.id === session.id
+          ? `drop-${dropTarget.position}`
+          : ''
       }`}
       style={{ paddingLeft: 28 + depth * 14 }}
       title={tr(
-        `${sessionTarget(session)}（拖到终端分屏）`,
-        `${sessionTarget(session)} (drag onto a terminal to split)`
+        `${sessionTarget(session)}（拖到终端分屏；拖到列表可排序或移入分组）`,
+        `${sessionTarget(session)} (drag onto a terminal to split, or within the list to reorder)`
       )}
       tabIndex={0}
       // Dragging a session onto a pane opens it there, which is how an SSH
-      // session and a serial session end up side by side.
+      // session and a serial session end up side by side. Dropping it back on
+      // the list reorders it or moves it into another folder.
       draggable
       data-session-id={session.id}
       onDragStart={(event) => setSessionDragData(event.dataTransfer, session.id)}
+      onDragOver={(event) => {
+        if (!isSessionDrag(event.dataTransfer)) return
+        event.preventDefault()
+        event.stopPropagation()
+        event.dataTransfer.dropEffect = 'move'
+        const rect = event.currentTarget.getBoundingClientRect()
+        const position = event.clientY > rect.top + rect.height / 2 ? 'after' : 'before'
+        setDropTarget((previous) =>
+          previous?.kind === 'session' &&
+          previous.id === session.id &&
+          previous.position === position
+            ? previous
+            : { kind: 'session', id: session.id, position }
+        )
+      }}
+      onDragLeave={(event) => {
+        if (!isSessionDrag(event.dataTransfer)) return
+        const related = event.relatedTarget as Node | null
+        if (related && event.currentTarget.contains(related)) return
+        setDropTarget((previous) =>
+          previous?.kind === 'session' && previous.id === session.id ? null : previous
+        )
+      }}
+      onDrop={(event) => dropOnSession(event, session)}
       onClick={() => setSelectedId(session.id)}
       onDoubleClick={() => openSession(session)}
       onContextMenu={(event) => openMenuForSession(event, session)}
@@ -376,10 +474,32 @@ export function SessionSidebar(): ReactElement {
     return (
       <div key={folder.id}>
         <div
-          className="tree-folder"
+          className={`tree-folder ${
+            dropTarget?.kind === 'folder' && dropTarget.id === folder.id ? 'drop-inside' : ''
+          }`}
           style={{ paddingLeft: 8 + depth * 14 }}
           onClick={() => toggleFolder(folder.id)}
           onContextMenu={(event) => openMenuForFolder(event, folder)}
+          onDragOver={(event) => {
+            if (!isSessionDrag(event.dataTransfer)) return
+            event.preventDefault()
+            event.stopPropagation()
+            event.dataTransfer.dropEffect = 'move'
+            setDropTarget((previous) =>
+              previous?.kind === 'folder' && previous.id === folder.id
+                ? previous
+                : { kind: 'folder', id: folder.id }
+            )
+          }}
+          onDragLeave={(event) => {
+            if (!isSessionDrag(event.dataTransfer)) return
+            const related = event.relatedTarget as Node | null
+            if (related && event.currentTarget.contains(related)) return
+            setDropTarget((previous) =>
+              previous?.kind === 'folder' && previous.id === folder.id ? null : previous
+            )
+          }}
+          onDrop={(event) => dropOnFolder(event, folder)}
         >
           <Icon name={isCollapsed ? 'chevron-right' : 'chevron-down'} size={13} />
           <Icon name={isCollapsed ? 'folder' : 'folder-open'} size={15} />
@@ -507,7 +627,22 @@ export function SessionSidebar(): ReactElement {
         ) : null}
       </div>
 
-      <div className="session-tree">
+      <div
+        className={`session-tree ${dropTarget?.kind === 'root' ? 'drop-root' : ''}`}
+        onDragOver={(event) => {
+          if (!isSessionDrag(event.dataTransfer)) return
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'move'
+          setDropTarget((previous) => (previous?.kind === 'root' ? previous : { kind: 'root' }))
+        }}
+        onDragLeave={(event) => {
+          if (!isSessionDrag(event.dataTransfer)) return
+          const related = event.relatedTarget as Node | null
+          if (related && event.currentTarget.contains(related)) return
+          setDropTarget((previous) => (previous?.kind === 'root' ? null : previous))
+        }}
+        onDrop={dropOnRoot}
+      >
         {q ? (
           filtered.length ? (
             <>

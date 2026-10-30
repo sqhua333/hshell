@@ -361,6 +361,26 @@ kbd {
   background: var(--active);
 }
 
+/* Drop feedback while a session is dragged within the tree: a line where it
+   will be inserted, or a highlight when it will land inside a folder. */
+.session-row.drop-before {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.session-row.drop-after {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.tree-folder.drop-inside {
+  background: var(--active);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.session-tree.drop-root {
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
 .session-color {
   flex: none;
   width: 7px;

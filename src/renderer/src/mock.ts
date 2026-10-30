@@ -407,6 +407,18 @@ export function createMockApi(): HshellApi {
         else sessions.push(session)
         return session
       },
+      move: async (id, folderId, beforeId) => {
+        const index = sessions.findIndex((item) => item.id === id)
+        if (index >= 0) {
+          const [session] = sessions.splice(index, 1)
+          session.folderId = folderId
+          const at = beforeId
+            ? sessions.findIndex((item) => item.id === beforeId && item.folderId === folderId)
+            : -1
+          sessions.splice(at >= 0 ? at : sessions.length, 0, session)
+        }
+        return { folders: [...folders], sessions: [...sessions] }
+      },
       remove: async (id) => {
         const index = sessions.findIndex((item) => item.id === id)
         if (index >= 0) sessions.splice(index, 1)

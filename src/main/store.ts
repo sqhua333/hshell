@@ -194,6 +194,31 @@ export class AppStore {
     return { ...session, auth: { ...session.auth, password: undefined } }
   }
 
+  /**
+   * Move a session to another folder and/or position. The array order is the
+   * display order, so it is persisted as-is and survives a restart.
+   */
+  moveSession(id: string, folderId: string | null, beforeId: string | null): SessionData {
+    this.assertWritable()
+    const session = this.sessions.find((item) => item.id === id)
+    if (!session) throw new Error('会话不存在')
+    const target =
+      folderId && this.folders.some((folder) => folder.id === folderId) ? folderId : null
+    const rest = this.sessions.filter((item) => item.id !== id)
+    // Only a sibling in the target folder is a meaningful insertion point.
+    const at = beforeId
+      ? rest.findIndex((item) => item.id === beforeId && item.folderId === target)
+      : -1
+    rest.splice(at >= 0 ? at : rest.length, 0, {
+      ...session,
+      folderId: target,
+      updatedAt: Date.now()
+    })
+    this.sessions = rest
+    this.persistSessions()
+    return this.list()
+  }
+
   removeSession(id: string): void {
     this.assertWritable()
     this.sessions = this.sessions.filter((s) => s.id !== id)

@@ -252,16 +252,18 @@ export function computeGeometry(root: LayoutNode): LayoutGeometry {
     for (let index = 0; index < node.children.length; index += 1) {
       if (index > 0) offsets.push(offset)
       const fraction = sizes[index] / 100
+      // `offset` is a fraction of this split's own axis, which can itself be
+      // a part of the canvas: nested splits must scale it by the parent rect.
       const childRect: PaneRect = horizontal
         ? {
-            left: rect.left + offset,
+            left: rect.left + rect.width * offset,
             top: rect.top,
             width: rect.width * fraction,
             height: rect.height
           }
         : {
             left: rect.left,
-            top: rect.top + offset,
+            top: rect.top + rect.height * offset,
             width: rect.width,
             height: rect.height * fraction
           }

@@ -331,6 +331,32 @@ describe('computeGeometry', () => {
     expect(innerGeometry?.rect).toEqual({ left: 0, top: 0.4, width: 1, height: 0.6 })
   })
 
+  it('keeps a nested split inside its parent rectangle', () => {
+    // Split the right half horizontally, then split its bottom half again in
+    // the same direction: the third pane belongs in the bottom-right quarter,
+    // and the fourth must stay inside the right edge of the canvas.
+    const panes = ['a', 'b', 'c', 'd'].map((id) => pane(id))
+    const bottom = splitNode('horizontal', [paneNode(panes[2]), paneNode(panes[3])], [50, 50])
+    const right = splitNode('vertical', [paneNode(panes[1]), bottom], [50, 50])
+    const root = splitNode('horizontal', [paneNode(panes[0]), right], [50, 50])
+    const geometry = computeGeometry(root)
+
+    expect(geometry.panes.get(panes[2].id)).toEqual({
+      left: 0.5,
+      top: 0.5,
+      width: 0.25,
+      height: 0.5
+    })
+    expect(geometry.panes.get(panes[3].id)).toEqual({
+      left: 0.75,
+      top: 0.5,
+      width: 0.25,
+      height: 0.5
+    })
+    const nested = geometry.splits.find((item) => item.id === bottom.id)
+    expect(nested?.rect).toEqual({ left: 0.5, top: 0.5, width: 0.5, height: 0.5 })
+  })
+
   it('positions several dividers in a four-way split', () => {
     const panes = ['a', 'b', 'c', 'd'].map((id) => pane(id))
     const root = splitNode(
