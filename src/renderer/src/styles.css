@@ -610,15 +610,21 @@ kbd {
   touch-action: none;
 }
 
+/*
+ * The handle sits entirely inside the leading pane instead of straddling the
+ * split line: terminals have no inner padding, so a centred handle would cover
+ * the first character of the trailing pane's column 0 (and its first row when
+ * split vertically).
+ */
 .pane-handle.horizontal {
   width: 5px;
-  transform: translateX(-50%);
+  transform: translateX(-100%);
   cursor: col-resize;
 }
 
 .pane-handle.vertical {
   height: 5px;
-  transform: translateY(-50%);
+  transform: translateY(-100%);
   cursor: row-resize;
 }
 
